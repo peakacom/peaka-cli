@@ -104,6 +104,26 @@ homebrew_casks:
       zsh: completions/peaka.zsh
       fish: completions/peaka.fish
 
+# Windows: a Scoop manifest pushed to peakacom/scoop-bucket
+# (scoop bucket add peaka https://github.com/peakacom/scoop-bucket; scoop install peaka).
+scoops:
+  - name: peaka
+    ids: [peaka]
+    repository:
+      owner: peakacom
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    directory: bucket
+    commit_author:
+      name: peaka-release
+      email: dev@peaka.com
+    commit_msg_template: "peaka {{ .Tag }}"
+    homepage: https://www.peaka.com
+    description: "Peaka from the terminal: the public API, a SQL session over dbc, MCP tools for agents"
+    license: Apache-2.0
+    skip_upload: '{{ if index .Env "SCOOP_BUCKET_TOKEN" }}auto{{ else }}true{{ end }}'
+
 nfpms:
   - id: packages
     package_name: peaka

@@ -92,6 +92,7 @@ commands: `\dc` `\dn` `\dt` `\d` `\use` `\x` `\format` `\timing` `\pager`
 brew install peakacom/tap/peaka                                                  # macOS, Linux
 curl -fsSL https://raw.githubusercontent.com/peakacom/peaka-cli/main/install.sh | sh   # any Unix
 peaka upgrade                                                                    # later releases
+scoop bucket add peaka https://github.com/peakacom/scoop-bucket; scoop install peaka   # Windows
 ```
 
 Releases (archives for macOS, Linux and Windows, deb and rpm packages, with

@@ -24,7 +24,8 @@ run: build
 
 # Releases are cut from a developer machine, no CI: `make release VERSION=0.2.0` tests, tags v0.2.0, pushes the tag
 # and runs goreleaser, which builds every platform and publishes the GitHub Release (archives, deb/rpm,
-# checksums.txt); scripts/tap.sh then pushes the Homebrew cask to peakacom/homebrew-tap. Both use the gh CLI's
+# checksums.txt) and pushes the Scoop manifest to peakacom/scoop-bucket; scripts/tap.sh then pushes the Homebrew
+# cask to peakacom/homebrew-tap. All use the gh CLI's
 # login (GITHUB_TOKEN overrides it); `make release TAP=` skips the tap (push its printed cask from a fork instead).
 release-check:
 	goreleaser check
@@ -39,7 +40,7 @@ release:
 	go vet ./... && go test ./...
 	git tag -a v$(VERSION) -m "peaka $(VERSION)"
 	git push origin main v$(VERSION)
-	GITHUB_TOKEN="$${GITHUB_TOKEN:-$$(gh auth token)}" goreleaser release --clean
+	GITHUB_TOKEN="$${GITHUB_TOKEN:-$$(gh auth token)}" SCOOP_BUCKET_TOKEN="$${SCOOP_BUCKET_TOKEN-$${GITHUB_TOKEN:-$$(gh auth token)}}" goreleaser release --clean
 	@if [ -n "$(TAP)" ]; then scripts/tap.sh; else echo "tap skipped; cask: scripts/tap.sh --print"; fi
 
 TAP ?= yes
