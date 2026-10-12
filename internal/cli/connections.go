@@ -613,19 +613,9 @@ func prompt(label, def string) (string, error) {
 	} else {
 		fmt.Fprintf(rt.Err, "%s: ", label)
 	}
-	var line string
-	buf := make([]byte, 1)
-	ended := false
-	for {
-		n, err := rt.In.Read(buf)
-		if n == 0 || err != nil {
-			ended = true
-			break
-		}
-		if buf[0] == '\n' {
-			break
-		}
-		line += string(buf[0])
+	line, ended, err := readLine()
+	if err != nil {
+		return "", err
 	}
 	line = strings.TrimSpace(line)
 	if ended && line == "" {
@@ -636,6 +626,40 @@ func prompt(label, def string) (string, error) {
 		line = def
 	}
 	return line, nil
+}
+
+// readLine reads one line from stdin, byte by byte so nothing past the newline
+// is swallowed, and gives up on Ctrl-C: the read runs aside, and the command's
+// context (cancelled by the signal) wins over it.
+func readLine() (line string, ended bool, err error) {
+	type result struct {
+		line  string
+		ended bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		var b strings.Builder
+		buf := make([]byte, 1)
+		for {
+			n, err := rt.In.Read(buf)
+			if n == 0 || err != nil {
+				done <- result{b.String(), true}
+				return
+			}
+			if buf[0] == '\n' {
+				done <- result{b.String(), false}
+				return
+			}
+			b.WriteByte(buf[0])
+		}
+	}()
+	select {
+	case r := <-done:
+		return r.line, r.ended, nil
+	case <-rt.Ctx.Done():
+		fmt.Fprintln(rt.Err)
+		return "", false, api.Exit(api.ExitInterrupted, "interrupted")
+	}
 }
 
 func openBrowser(u string) error {

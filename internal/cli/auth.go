@@ -261,12 +261,33 @@ func newAuthTokenCmd() *cobra.Command {
 func readSecret(prompt string) (string, error) {
 	if rt.StdinTTY {
 		fmt.Fprint(rt.Err, prompt)
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(rt.Err)
-		if err != nil {
-			return "", err
+		fd := int(os.Stdin.Fd())
+		// Ctrl-C while the secret is being read: the terminal is left as it was
+		// found (ReadPassword turns echo off and would not get to turn it back on).
+		state, _ := term.GetState(fd)
+		type result struct {
+			b   []byte
+			err error
 		}
-		return strings.TrimSpace(string(b)), nil
+		done := make(chan result, 1)
+		go func() {
+			b, err := term.ReadPassword(fd)
+			done <- result{b, err}
+		}()
+		select {
+		case r := <-done:
+			fmt.Fprintln(rt.Err)
+			if r.err != nil {
+				return "", r.err
+			}
+			return strings.TrimSpace(string(r.b)), nil
+		case <-rt.Ctx.Done():
+			if state != nil {
+				_ = term.Restore(fd, state)
+			}
+			fmt.Fprintln(rt.Err)
+			return "", api.Exit(api.ExitInterrupted, "interrupted")
+		}
 	}
 	line, err := bufio.NewReader(rt.In).ReadString('\n')
 	if err != nil && line == "" {
