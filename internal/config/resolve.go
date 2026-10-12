@@ -12,6 +12,7 @@ type Settings struct {
 	Environment   string
 	API           string
 	DBC           string
+	OAuth         string
 	Account       string
 	Org           string
 	Project       string
@@ -25,7 +26,7 @@ type Settings struct {
 
 // Overrides are the values given on the command line ("" = not given).
 type Overrides struct {
-	Environment, API, DBC, Account, Org, Project, Format string
+	Environment, API, DBC, OAuth, Account, Org, Project, Format string
 }
 
 // envVar maps a property to its environment variable.
@@ -33,6 +34,7 @@ var envVar = map[string]string{
 	"environment": "PEAKA_ENVIRONMENT",
 	"api":         "PEAKA_API_URL",
 	"dbc":         "PEAKA_DBC_URL",
+	"oauth":       "PEAKA_OAUTH_URL",
 	"account":     "PEAKA_ACCOUNT",
 	"org":         "PEAKA_ORG",
 	"project":     "PEAKA_PROJECT",
@@ -72,6 +74,10 @@ func Resolve(c *Configuration, o Overrides) *Settings {
 	if s.DBC == "" {
 		s.DBC, s.Source["dbc"] = preset.DBC, "preset("+s.Environment+")"
 	}
+	s.OAuth = pick("oauth", o.OAuth)
+	if s.OAuth == "" {
+		s.OAuth, s.Source["oauth"] = preset.OAuth, "preset("+s.Environment+")"
+	}
 	s.Account = pick("account", o.Account)
 	s.Org = pick("org", o.Org)
 	s.Project = pick("project", o.Project)
@@ -96,7 +102,7 @@ func (s *Settings) APIHost() string {
 // Values returns the properties as a map (for `config list`).
 func (s *Settings) Values() map[string]string {
 	return map[string]string{
-		"environment": s.Environment, "api": s.API, "dbc": s.DBC, "account": s.Account,
+		"environment": s.Environment, "api": s.API, "dbc": s.DBC, "oauth": s.OAuth, "account": s.Account,
 		"org": s.Org, "project": s.Project, "format": s.Format, "color": s.Color, "pager": s.Pager,
 	}
 }

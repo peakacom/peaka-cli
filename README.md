@@ -7,7 +7,7 @@ by default when piped.
 ```
 peaka <resource> <verb> [args] [flags]
 
-peaka auth login --api-key                 # store an identity (browser login: next phase)
+peaka auth login                            # browser login (OAuth 2.0 + PKCE); --api-key for a key
 peaka orgs use acme && peaka projects use analytics
 peaka projects list                         # table on a terminal, JSON in a pipe
 peaka api GET /connections/config --jq length
@@ -113,6 +113,18 @@ preset > default. `peaka config list` shows each value with its source.
 `PEAKA_API_KEY` bypasses stored accounts. `PEAKA_CONFIGURATION` selects the
 configuration. Secrets go to the OS keychain, or to `credentials.json` (0600)
 when there is none or `PEAKA_CREDENTIALS_STORE=file`.
+
+## Login
+
+`peaka auth login` opens the browser: you log in to Peaka, approve the CLI, and
+the terminal continues. Under the hood it is OAuth 2.0 authorization code with
+PKCE through a loopback redirect (RFC 8252) against the environment's
+authorization server (`oauth` property, `PEAKA_OAUTH_URL`); the CLI registers
+itself once per server as a public client (`oauth-clients.json`). Access tokens
+last an hour and are refreshed silently; the refresh token lasts months.
+`peaka auth status` shows the expiry, `peaka auth logout` revokes and forgets.
+`--no-browser` prints the URL for SSH sessions. API keys remain available with
+`--api-key` and `PEAKA_API_KEY` (CI, agents, service accounts).
 
 ## Contract
 

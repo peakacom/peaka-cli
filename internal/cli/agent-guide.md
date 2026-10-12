@@ -22,7 +22,7 @@ SQL: `peaka sql "STATEMENT"` runs Trino SQL on the project in context; `--format
 2. stdout is data, stderr is for people. When stdout is a pipe the format is `json`; pass `--format jsonl|csv|yaml` to change it, `--fields a,b` to pick columns, `--jq EXPR` to filter.
 3. Errors are the API's problem+json on stderr, one line: `{"code":"PERMISSION_REQUIRED","status":403,"detail":"...","retryable":false,"traceId":"..."}`. Branch on `code`, never on `detail`.
 4. Exit codes: 0 ok · 1 unexpected · 2 usage · 3 identity missing/invalid · 4 not found · 5 not allowed · 6 invalid request · 7 conflict · 8 query/job failed · 9 retryable (wait, then retry the same command) · 130 interrupted.
-5. Identity: `PEAKA_API_KEY=<key>` is enough. Otherwise a stored account is used (`peaka auth login --api-key`).
+5. Identity: `PEAKA_API_KEY=<key>` is enough. Otherwise a stored account is used: a person's browser login (`peaka auth login`) or a key (`peaka auth login --api-key`).
 6. Context: `PEAKA_PROJECT=<id>` and `PEAKA_ORG=<id>` (or `--project`, `--org`). Run `peaka me` first: it prints the identity and the context.
 7. `--dry-run` prints the request a writing command would send instead of sending it; `--if-not-exists` makes a create succeed when the thing exists; `--debug` prints the HTTP exchange to stderr.
 8. `peaka api METHOD PATH [-f k=v] [--input body.json]` reaches any REST endpoint; see `peaka api --help`.

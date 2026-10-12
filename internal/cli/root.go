@@ -28,6 +28,7 @@ type globalFlags struct {
 	environment   string
 	apiURL        string
 	dbcURL        string
+	oauthURL      string
 	account       string
 	org           string
 	project       string
@@ -169,6 +170,7 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 	pf.StringVar(&gf.environment, "environment", "", "preset for api and dbc: prod, eu, test (PEAKA_ENVIRONMENT)")
 	pf.StringVar(&gf.apiURL, "api-url", "", "REST API base URL (PEAKA_API_URL)")
 	pf.StringVar(&gf.dbcURL, "dbc-url", "", "SQL endpoint URL (PEAKA_DBC_URL)")
+	pf.StringVar(&gf.oauthURL, "oauth-url", "", "OAuth authorization server URL for browser login (PEAKA_OAUTH_URL)")
 	pf.StringVar(&gf.account, "account", "", "stored account to act as (PEAKA_ACCOUNT)")
 	pf.StringVar(&gf.org, "org", "", "organization id or name (PEAKA_ORG)")
 	pf.StringVarP(&gf.project, "project", "p", "", "project id or name (PEAKA_PROJECT)")
@@ -208,7 +210,7 @@ func initRuntime(cmd *cobra.Command) error {
 		return api.Exit(api.ExitUsage, "%v", err)
 	}
 	settings := config.Resolve(cfg, config.Overrides{
-		Environment: gf.environment, API: gf.apiURL, DBC: gf.dbcURL,
+		Environment: gf.environment, API: gf.apiURL, DBC: gf.dbcURL, OAuth: gf.oauthURL,
 		Account: gf.account, Org: gf.org, Project: gf.project, Format: gf.format,
 	})
 	rt = &Runtime{
@@ -317,6 +319,14 @@ func (r *Runtime) token() (string, *config.Account, error) {
 	}
 	if a == nil {
 		return "", nil, api.Exit(api.ExitAuth, "account %q is not stored for %s: `peaka auth list`", name, host)
+	}
+	if a.Kind == "oauth" {
+		tok, err := r.oauthToken(*a)
+		if err != nil {
+			return "", nil, err
+		}
+		r.identity = fmt.Sprintf("browser login %q (%s) for %s", a.Name, a.Subject, host)
+		return tok, a, nil
 	}
 	secret, err := config.Secret(*a)
 	if err != nil {

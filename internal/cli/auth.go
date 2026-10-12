@@ -12,6 +12,7 @@ import (
 
 	"github.com/peakacom/peaka-cli/internal/api"
 	"github.com/peakacom/peaka-cli/internal/config"
+	"github.com/peakacom/peaka-cli/internal/oauth"
 )
 
 func newAuthCmd() *cobra.Command {
@@ -27,20 +28,24 @@ func newAuthLoginCmd() *cobra.Command {
 	var apiKey string
 	var withKey bool
 	var name string
+	bo := browserLoginOptions{}
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Store an identity for the current api endpoint",
-		Long: `Stores an identity for the API endpoint of the active configuration and makes it the configuration's account.
+		Short: "Log in through the browser, or store an API key, for the current api endpoint",
+		Long: `Without flags, opens Peaka in the browser; after the login and the consent the CLI
+receives the authorization and acts as you (OAuth 2.0 with PKCE; the access token
+is refreshed in the background, the refresh token lasts months).
 
-  peaka auth login --api-key            # prompts for the key (hidden)
+  peaka auth login                      # browser login
+  peaka auth login --no-browser         # print the URL instead of opening it (SSH sessions)
+  peaka auth login --api-key            # prompts for an API key (hidden)
   peaka auth login --api-key KEY        # key on the command line
-  echo $KEY | peaka auth login --api-key --name ci
-
-Browser login (peaka auth login without --api-key) arrives with the OAuth phase.`,
+  echo $KEY | peaka auth login --api-key --name ci`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !withKey {
-				return api.Exit(api.ExitUsage, "browser login is not available yet; use `peaka auth login --api-key` (or PEAKA_API_KEY)")
+				bo.name = name
+				return runBrowserLogin(bo)
 			}
 			key := strings.TrimSpace(apiKey)
 			if key == "" {
@@ -85,7 +90,10 @@ Browser login (peaka auth login without --api-key) arrives with the OAuth phase.
 	}
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key; empty value prompts")
 	cmd.Flags().Lookup("api-key").NoOptDefVal = " "
-	cmd.Flags().StringVar(&name, "name", "", "name to store the account under (default: derived from the key)")
+	cmd.Flags().StringVar(&name, "name", "", "name to store the account under (default: your email, or derived from the key)")
+	cmd.Flags().BoolVar(&bo.noBrowser, "no-browser", false, "print the login URL instead of opening a browser")
+	cmd.Flags().IntVar(&bo.port, "callback-port", 0, "local port for the login redirect (default: a free one)")
+	cmd.Flags().DurationVar(&bo.timeout, "wait-timeout", 10*time.Minute, "how long to wait for the browser")
 	cmd.PreRun = func(cmd *cobra.Command, args []string) { withKey = cmd.Flags().Changed("api-key") }
 	return cmd
 }
@@ -104,6 +112,7 @@ func newAuthLogoutCmd() *cobra.Command {
 					return err
 				}
 				for _, a := range accts {
+					rt.revokeAccount(a)
 					if err := config.RemoveAccount(host, a.Name); err != nil {
 						return err
 					}
@@ -116,6 +125,9 @@ func newAuthLogoutCmd() *cobra.Command {
 				}
 				if name == "" {
 					return api.Exit(api.ExitUsage, "which account? `peaka auth list`, then `peaka auth logout NAME`")
+				}
+				if a, _ := config.FindAccount(host, name); a != nil {
+					rt.revokeAccount(*a)
 				}
 				if err := config.RemoveAccount(host, name); err != nil {
 					return api.Exit(api.ExitNotFound, "%v", err)
@@ -189,6 +201,12 @@ func newAuthStatusCmd() *cobra.Command {
 				"api": rt.Settings.API, "source": source, "account": name, "token": config.MaskSecret(tok),
 				"valid": infoErr == nil, "identity": info,
 			}
+			if acct != nil {
+				out["kind"] = acct.Kind
+			}
+			if exp, ok := oauth.Claims(tok)["exp"].(float64); ok {
+				out["expiresAt"] = time.Unix(int64(exp), 0).UTC().Format(time.RFC3339)
+			}
 			if infoErr != nil {
 				if p, ok := infoErr.(*api.Problem); ok {
 					out["error"] = p
@@ -202,6 +220,12 @@ func newAuthStatusCmd() *cobra.Command {
 					fmt.Fprintf(rt.Out, "account  %s\n", name)
 				}
 				fmt.Fprintf(rt.Out, "token    %s\n", config.MaskSecret(tok))
+				if acct != nil {
+					fmt.Fprintf(rt.Out, "kind     %s\n", acct.Kind)
+				}
+				if exp, ok := out["expiresAt"]; ok {
+					fmt.Fprintf(rt.Out, "expires  %s (refreshed automatically)\n", exp)
+				}
 				if infoErr != nil {
 					fmt.Fprintf(rt.Out, "valid    no\n")
 					return infoErr

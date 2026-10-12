@@ -21,7 +21,9 @@ type Account struct {
 	Kind     string    `json:"kind"` // api-key | oauth
 	KeyType  string    `json:"keyType,omitempty"`
 	KeyID    string    `json:"keyId,omitempty"`
-	Subject  string    `json:"subject,omitempty"` // what /info said: org or project name, email
+	Subject  string    `json:"subject,omitempty"`  // what /info said: org or project name, email
+	Issuer   string    `json:"issuer,omitempty"`   // oauth: the authorization server
+	ClientID string    `json:"clientId,omitempty"` // oauth: the registered public client
 	Created  time.Time `json:"created"`
 	LastUsed time.Time `json:"lastUsed,omitempty"`
 }
