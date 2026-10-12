@@ -27,9 +27,10 @@ func newTablesCmd() *cobra.Command {
 	}
 	var bi bool
 	list := &cobra.Command{
-		Use:   "list [CATALOG.SCHEMA]",
-		Short: "List the tables of a schema; without an argument, the project's internal Peaka tables",
-		Args:  cobra.MaximumNArgs(1),
+		Use:               "list [CATALOG.SCHEMA]",
+		ValidArgsFunction: argCompleter(completeDotted(2)),
+		Short:             "List the tables of a schema; without an argument, the project's internal Peaka tables",
+		Args:              cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
 			if err != nil {
@@ -49,10 +50,11 @@ func newTablesCmd() *cobra.Command {
 	list.Flags().BoolVar(&bi, "bi", false, "internal BI tables instead of Peaka tables")
 
 	describe := &cobra.Command{
-		Use:     "describe TABLE",
-		Aliases: []string{"get", "columns"},
-		Short:   "Columns of a table: catalog.schema.table, or the NAME of an internal table",
-		Args:    cobra.ExactArgs(1),
+		Use:               "describe TABLE",
+		ValidArgsFunction: argCompleter(completeDotted(3)),
+		Aliases:           []string{"get", "columns"},
+		Short:             "Columns of a table: catalog.schema.table, or the NAME of an internal table",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
 			if err != nil {
@@ -78,8 +80,9 @@ func newTablesCmd() *cobra.Command {
 
 	ef := &exportFlags{}
 	export := &cobra.Command{
-		Use:   "export TABLE",
-		Short: "Export catalog.schema.table to files (CSV, JSON, JSONL, PARQUET)",
+		Use:               "export TABLE",
+		ValidArgsFunction: argCompleter(completeDotted(3)),
+		Short:             "Export catalog.schema.table to files (CSV, JSON, JSONL, PARQUET)",
 		Long: `  peaka tables export stripe.payment.charges --format-out PARQUET --wait
   peaka tables export stripe.payment.charges --limit 1000 --out ./exports`,
 		Args: cobra.ExactArgs(1),
@@ -109,9 +112,10 @@ func newTablesCmd() *cobra.Command {
 	create.Flags().BoolVar(&bi, "bi", false, "create a BI table")
 
 	del := &cobra.Command{
-		Use:   "delete NAME",
-		Short: "Delete an internal Peaka table",
-		Args:  cobra.ExactArgs(1),
+		Use:               "delete NAME",
+		ValidArgsFunction: argCompleter(completeInternalTables),
+		Short:             "Delete an internal Peaka table",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
 			if err != nil {
@@ -135,10 +139,11 @@ func newTablesCmd() *cobra.Command {
 	}
 	var addBody columnBody
 	addCol := &cobra.Command{
-		Use:   "add-column TABLE COLUMN",
-		Short: "Add a column to an internal table",
-		Long:  "  peaka tables add-column customers email --type text --not-null\n  peaka tables add-column orders amount --type decimal --default 0",
-		Args:  cobra.ExactArgs(2),
+		Use:               "add-column TABLE COLUMN",
+		ValidArgsFunction: argCompleter(completeInternalTables),
+		Short:             "Add a column to an internal table",
+		Long:              "  peaka tables add-column customers email --type text --not-null\n  peaka tables add-column orders amount --type decimal --default 0",
+		Args:              cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
 			if err != nil {
@@ -155,9 +160,10 @@ func newTablesCmd() *cobra.Command {
 
 	var updBody columnBody
 	updCol := &cobra.Command{
-		Use:   "update-column TABLE COLUMN",
-		Short: "Change a column of an internal table (type, display name, default, constraints)",
-		Args:  cobra.ExactArgs(2),
+		Use:               "update-column TABLE COLUMN",
+		ValidArgsFunction: argCompleter(completeInternalTables),
+		Short:             "Change a column of an internal table (type, display name, default, constraints)",
+		Args:              cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
 			if err != nil {
@@ -192,9 +198,10 @@ func newTablesCmd() *cobra.Command {
 	colFlags(updCol, &updBody)
 
 	dropCol := &cobra.Command{
-		Use:   "drop-column TABLE COLUMN",
-		Short: "Remove a column from an internal table",
-		Args:  cobra.ExactArgs(2),
+		Use:               "drop-column TABLE COLUMN",
+		ValidArgsFunction: argCompleter(completeInternalTables),
+		Short:             "Remove a column from an internal table",
+		Args:              cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
 			if err != nil {
@@ -261,8 +268,9 @@ func newTablesImportCmd() *cobra.Command {
 	var noHeader bool
 	var mappings []string
 	cmd := &cobra.Command{
-		Use:   "import TABLE",
-		Short: "Import a CSV file into an internal Peaka table",
+		Use:               "import TABLE",
+		ValidArgsFunction: argCompleter(completeInternalTables),
+		Short:             "Import a CSV file into an internal Peaka table",
 		Long: `Columns are matched by header name unless --map says otherwise.
 
   peaka tables import customers --file customers.csv
@@ -349,9 +357,10 @@ func newTablesImportCmd() *cobra.Command {
 
 func newTablesSampleCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "sample TABLE",
-		Short: "A sample CSV in the shape `tables import` expects",
-		Args:  cobra.ExactArgs(1),
+		Use:               "sample TABLE",
+		ValidArgsFunction: argCompleter(completeDotted(3)),
+		Short:             "A sample CSV in the shape `tables import` expects",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
 			if err != nil {

@@ -111,11 +111,21 @@ func runBrowserLogin(o browserLoginOptions) error {
 	go srv.Serve(lis)
 	defer srv.Shutdown(context.Background())
 
-	fmt.Fprintf(rt.Err, "Log in to Peaka in your browser:\n  %s\n", authURL)
+	// The link is the request itself (client, PKCE challenge, loopback port,
+	// state), so it is long; it is shown only when someone has to carry it to a
+	// browser themselves.
+	opened := false
 	if !o.noBrowser {
 		if err := openBrowser(authURL); err != nil {
 			fmt.Fprintf(rt.Err, "(could not open a browser: %v)\n", err)
+		} else {
+			opened = true
 		}
+	}
+	if opened {
+		fmt.Fprintln(rt.Err, "Opening your browser to log in to Peaka … (--no-browser prints the link instead)")
+	} else {
+		fmt.Fprintf(rt.Err, "Open this link in a browser to log in to Peaka:\n  %s\n", authURL)
 	}
 	fmt.Fprint(rt.Err, "Waiting for the login … ")
 	wait, cancel := context.WithTimeout(ctx, o.timeout)

@@ -64,9 +64,10 @@ func newOrgsCmd() *cobra.Command {
 			},
 		},
 		&cobra.Command{
-			Use:   "use ID|NAME",
-			Short: "Make an organization the context of the active configuration",
-			Args:  cobra.ExactArgs(1),
+			Use:               "use ID|NAME",
+			Short:             "Make an organization the context of the active configuration",
+			Args:              cobra.ExactArgs(1),
+			ValidArgsFunction: argCompleter(completeOrgs),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				org, err := rt.resolveOrg(args[0])
 				if err != nil {

@@ -244,8 +244,9 @@ func newExportsWaitCmd() *cobra.Command {
 func newQueriesExportCmd() *cobra.Command {
 	f := &exportFlags{}
 	cmd := &cobra.Command{
-		Use:   "export ID|NAME",
-		Short: "Export a saved query's result to files (CSV, JSON, JSONL, PARQUET)",
+		Use:               "export ID|NAME",
+		ValidArgsFunction: argCompleter(completeQueries),
+		Short:             "Export a saved query's result to files (CSV, JSON, JSONL, PARQUET)",
 		Long: `  peaka queries export daily_revenue --format-out PARQUET --wait
   peaka queries export daily_revenue --out ./exports          # wait and download
   peaka queries export daily_revenue --out - | head             # stream the file to stdout`,

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,10 +45,11 @@ func newConnectionsCmd() *cobra.Command {
 	)
 	var detail bool
 	describe := &cobra.Command{
-		Use:     "describe ID|NAME",
-		Aliases: []string{"get"},
-		Short:   "Show one connection; --detail adds the catalogs and status",
-		Args:    cobra.ExactArgs(1),
+		Use:               "describe ID|NAME",
+		ValidArgsFunction: argCompleter(completeConnections),
+		Aliases:           []string{"get"},
+		Short:             "Show one connection; --detail adds the catalogs and status",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := map[string]string{}
 			if err := resolveConnection(rt, args[0], p); err != nil {
@@ -142,44 +144,94 @@ func (r *Runtime) connectionType(ref string) (record, error) {
 	if err != nil {
 		return nil, err
 	}
-	lower := strings.ToLower(ref)
-	var byKeyword []record
+	want := normalizeName(ref)
 	for _, t := range ts {
-		if strings.ToLower(str(t["connectionType"])) == lower {
+		if strings.EqualFold(str(t["connectionType"]), ref) {
 			return t, nil
 		}
 	}
+	// Loosely: GOOGLE_SHEETS is also "google-sheets", "Google Sheets" or "googlesheets";
+	// the label and the name count too, then a keyword that names one type alone.
+	var hits, byKeyword []record
 	for _, t := range ts {
-		if strings.EqualFold(str(t["connectionTypeLabel"]), ref) || strings.EqualFold(str(t["name"]), ref) {
-			return t, nil
+		if normalizeName(str(t["connectionType"])) == want || normalizeName(str(t["connectionTypeLabel"])) == want || normalizeName(str(t["name"])) == want {
+			hits = append(hits, t)
+			continue
 		}
 		if kws, ok := t["keywords"].([]any); ok {
 			for _, k := range kws {
-				if strings.EqualFold(str(k), ref) {
+				if normalizeName(str(k)) == want {
 					byKeyword = append(byKeyword, t)
+					break
 				}
 			}
 		}
 	}
-	if len(byKeyword) == 1 {
+	if len(hits) == 1 {
+		return hits[0], nil
+	}
+	if len(hits) == 0 && len(byKeyword) == 1 {
 		return byKeyword[0], nil
 	}
-	var close []string
-	for _, t := range ts {
-		ct := strings.ToLower(str(t["connectionType"]))
-		if strings.Contains(ct, lower) || strings.Contains(lower, ct) {
-			close = append(close, str(t["connectionType"]))
-		}
-	}
-	for _, t := range byKeyword {
-		close = append(close, str(t["connectionType"]))
-	}
+	close := closeConnectionTypes(ts, ref, 3)
 	hint := "`peaka connections types list` shows them"
 	if len(close) > 0 {
-		sort.Strings(close)
 		hint = "did you mean " + strings.Join(close, ", ") + "?"
 	}
 	return nil, api.Exit(api.ExitNotFound, "unknown connection type %q; %s", ref, hint)
+}
+
+// closeConnectionTypes names the types that look like ref, by type, label,
+// keyword, or a word of the type or label ("gogle" is a word away from Google).
+func closeConnectionTypes(ts []record, ref string, n int) []string {
+	byName := map[string][]string{} // any spelling or word → the types it names
+	var candidates []string
+	add := func(spelling, ct string) {
+		if spelling == "" {
+			return
+		}
+		if _, seen := byName[spelling]; !seen {
+			candidates = append(candidates, spelling)
+		}
+		byName[spelling] = append(byName[spelling], ct)
+	}
+	for _, t := range ts {
+		ct := str(t["connectionType"])
+		add(ct, ct)
+		add(str(t["connectionTypeLabel"]), ct)
+		add(str(t["name"]), ct)
+		if kws, ok := t["keywords"].([]any); ok {
+			for _, k := range kws {
+				add(str(k), ct)
+			}
+		}
+		for _, w := range strings.FieldsFunc(ct+" "+str(t["connectionTypeLabel"]), func(c rune) bool {
+			return c == '_' || c == '-' || c == ' ' || c == '/'
+		}) {
+			if len(w) >= 4 {
+				add(strings.ToLower(w), ct)
+			}
+		}
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, s := range suggestNames(candidates, ref, n*4) {
+		group := append([]string(nil), byName[s]...)
+		sort.Strings(group)
+		for _, ct := range group {
+			if !seen[ct] {
+				seen[ct] = true
+				out = append(out, ct)
+			}
+		}
+		if len(out) >= n {
+			break
+		}
+	}
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
 }
 
 func newConnectionTypesCmd() *cobra.Command {
@@ -215,10 +267,11 @@ func newConnectionTypesCmd() *cobra.Command {
 	list.Flags().StringVar(&category, "category", "", "only this category (Database, CRM, …)")
 	list.Flags().StringVar(&search, "search", "", "match type, name or keywords")
 	describe := &cobra.Command{
-		Use:     "describe TYPE",
-		Aliases: []string{"get"},
-		Short:   "Show a connection type with the credential fields it needs",
-		Args:    cobra.ExactArgs(1),
+		Use:               "describe TYPE",
+		ValidArgsFunction: argCompleter(completeConnectionTypes),
+		Aliases:           []string{"get"},
+		Short:             "Show a connection type with the credential fields it needs",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			t, err := rt.connectionType(args[0])
 			if err != nil {
@@ -270,6 +323,7 @@ questions built from the type's schema (` + "`peaka connections types describe T
 		RunE: func(cmd *cobra.Command, args []string) error { return runCreateConnection(f) },
 	}
 	cmd.Flags().StringVarP(&f.typ, "type", "t", "", "connection type (peaka connections types list)")
+	_ = cmd.RegisterFlagCompletionFunc("type", flagCompleter(completeConnectionTypes))
 	cmd.Flags().StringVarP(&f.name, "name", "n", "", "connection name")
 	cmd.Flags().StringArrayVarP(&f.credential, "credential", "c", nil, "credential field KEY=VALUE; repeatable")
 	cmd.Flags().StringVar(&f.credentialFile, "credential-file", "", "JSON file with the credential object (- for stdin)")
@@ -285,17 +339,15 @@ func runCreateConnection(f *createConnFlags) error {
 	if err != nil {
 		return err
 	}
+	var t record
 	if f.typ == "" {
 		if gf.noInput {
 			return api.Exit(api.ExitInvalid, "--type is required")
 		}
-		f.typ, err = prompt("Connection type", "")
-		if err != nil {
+		if t, err = promptConnectionType(); err != nil {
 			return err
 		}
-	}
-	t, err := rt.connectionType(f.typ)
-	if err != nil {
+	} else if t, err = rt.connectionType(f.typ); err != nil {
 		return err
 	}
 	typ := str(t["connectionType"])
@@ -592,4 +644,106 @@ func callbackPage(title, text string) string {
 <style>body{font-family:-apple-system,Segoe UI,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b0e14;color:#e6e6e6}
 .card{max-width:28rem;padding:2rem;border-radius:12px;background:#151a23;box-shadow:0 8px 32px rgba(0,0,0,.4)}h1{font-size:1.25rem;margin:0 0 .5rem}p{margin:0;opacity:.8}</style></head>
 <body><div class="card"><h1>%s</h1><p>%s</p></div></body></html>`, title, title, text)
+}
+
+// promptConnectionType asks for a connection type on a terminal and helps
+// with the answer: any spelling of a type is taken, a close miss offers the
+// nearest types as a numbered pick, "?" lists them all.
+func promptConnectionType() (record, error) {
+	ts, err := rt.connectionTypes()
+	if err != nil {
+		return nil, err
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		answer, err := prompt("Connection type (? lists them)", "")
+		if err != nil {
+			return nil, err
+		}
+		if answer == "?" || answer == "" {
+			listConnectionTypes(ts, "")
+			continue
+		}
+		t, err := rt.connectionType(answer)
+		if err == nil {
+			return t, nil
+		}
+		close := closeConnectionTypes(ts, answer, 6)
+		if len(close) == 0 {
+			// a word of the label, say "sheets" or "postgres": the types that mention it
+			close = containingConnectionTypes(ts, answer, 6)
+		}
+		if len(close) == 0 {
+			fmt.Fprintf(rt.Err, "No connection type looks like %q; ? lists them.\n", answer)
+			continue
+		}
+		fmt.Fprintf(rt.Err, "No connection type is called %q. Did you mean:\n", answer)
+		for i, ct := range close {
+			fmt.Fprintf(rt.Err, "  %d) %-24s %s\n", i+1, ct, labelOf(ts, ct))
+		}
+		pick, err := prompt(fmt.Sprintf("Pick 1-%d, or type again", len(close)), "")
+		if err != nil {
+			return nil, err
+		}
+		if n, err := strconv.Atoi(pick); err == nil && n >= 1 && n <= len(close) {
+			return rt.connectionType(close[n-1])
+		}
+		if pick != "" {
+			if t, err := rt.connectionType(pick); err == nil {
+				return t, nil
+			}
+		}
+	}
+	return nil, api.Exit(api.ExitUsage, "no connection type chosen; `peaka connections types list` shows them")
+}
+
+// containingConnectionTypes: the types whose type, label or keywords contain the word.
+func containingConnectionTypes(ts []record, word string, n int) []string {
+	want := normalizeName(word)
+	if want == "" {
+		return nil
+	}
+	var out []string
+	for _, t := range ts {
+		// the words of the type, its label and its keywords ("GOOGLE_SHEETS", "Google Sheets", "spreadsheet")
+		words := strings.FieldsFunc(str(t["connectionType"])+" "+str(t["connectionTypeLabel"]), func(c rune) bool {
+			return c == '_' || c == '-' || c == ' ' || c == '/'
+		})
+		if kws, ok := t["keywords"].([]any); ok {
+			for _, k := range kws {
+				words = append(words, str(k))
+			}
+		}
+		for _, w := range words {
+			if strings.HasPrefix(normalizeName(w), want) {
+				out = append(out, str(t["connectionType"]))
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
+}
+
+func labelOf(ts []record, connectionType string) string {
+	for _, t := range ts {
+		if str(t["connectionType"]) == connectionType {
+			return firstNonEmpty(str(t["connectionTypeLabel"]), str(t["name"]))
+		}
+	}
+	return ""
+}
+
+// listConnectionTypes prints the types, one per line, for a person choosing one.
+func listConnectionTypes(ts []record, category string) {
+	sorted := append([]record(nil), ts...)
+	sort.Slice(sorted, func(i, j int) bool { return str(sorted[i]["connectionType"]) < str(sorted[j]["connectionType"]) })
+	for _, t := range sorted {
+		if category != "" && !strings.EqualFold(str(t["category"]), category) {
+			continue
+		}
+		fmt.Fprintf(rt.Err, "  %-24s %-32s %s\n", str(t["connectionType"]), firstNonEmpty(str(t["connectionTypeLabel"]), str(t["name"])), str(t["category"]))
+	}
 }

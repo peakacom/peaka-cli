@@ -82,6 +82,7 @@ Without a statement on a terminal, the interactive session starts.`,
 	cmd.Flags().StringVarP(&f.file, "file", "f", "", "read the statement(s) from a file ('-' for stdin)")
 	cmd.Flags().IntVar(&f.maxRows, "max-rows", -1, "stop after this many rows (default: 1000 on a terminal, unlimited in a pipe; 0 = unlimited)")
 	cmd.Flags().StringVar(&f.catalog, "catalog", "", "default catalog for unqualified names")
+	_ = cmd.RegisterFlagCompletionFunc("catalog", flagCompleter(completeDotted(1)))
 	cmd.Flags().StringVar(&f.schema, "schema", "", "default schema for unqualified names")
 	cmd.Flags().BoolVar(&f.explain, "explain", false, "show the plan instead of running (EXPLAIN)")
 	cmd.Flags().BoolVar(&f.stats, "stats", false, "print query statistics to stderr")

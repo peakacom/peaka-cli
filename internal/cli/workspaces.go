@@ -49,9 +49,10 @@ func newWorkspacesCmd() *cobra.Command {
 
 	var uName, uDescription string
 	update := &cobra.Command{
-		Use:   "update ID|NAME",
-		Short: "Change a workspace's name or description",
-		Args:  cobra.ExactArgs(1),
+		Use:               "update ID|NAME",
+		ValidArgsFunction: argCompleter(completeWorkspaces),
+		Short:             "Change a workspace's name or description",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			orgID, err := rt.orgID()
 			if err != nil {
@@ -100,10 +101,11 @@ func newWorkspacesCmd() *cobra.Command {
 			},
 		},
 		&cobra.Command{
-			Use:     "describe ID|NAME",
-			Aliases: []string{"get"},
-			Short:   "Show one workspace",
-			Args:    cobra.ExactArgs(1),
+			Use:               "describe ID|NAME",
+			ValidArgsFunction: argCompleter(completeWorkspaces),
+			Aliases:           []string{"get"},
+			Short:             "Show one workspace",
+			Args:              cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				orgID, err := rt.orgID()
 				if err != nil {
@@ -131,9 +133,10 @@ func newWorkspacesCmd() *cobra.Command {
 		create,
 		update,
 		&cobra.Command{
-			Use:   "delete ID|NAME",
-			Short: "Delete a workspace",
-			Args:  cobra.ExactArgs(1),
+			Use:               "delete ID|NAME",
+			ValidArgsFunction: argCompleter(completeWorkspaces),
+			Short:             "Delete a workspace",
+			Args:              cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				orgID, err := rt.orgID()
 				if err != nil {

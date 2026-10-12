@@ -137,6 +137,7 @@ func newSearchCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&catalog, "catalog", "", "only this catalog (name)")
+	_ = cmd.RegisterFlagCompletionFunc("catalog", flagCompleter(completeDotted(1)))
 	cmd.Flags().StringVar(&schema, "schema", "", "only this schema")
 	cmd.Flags().IntVar(&limit, "limit", 0, "results to return (default 100)")
 	cmd.Flags().IntVar(&offset, "offset", 0, "results to skip")
@@ -174,6 +175,7 @@ func newCacheListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&catalog, "catalog", "", "catalog id or name")
+	_ = cmd.RegisterFlagCompletionFunc("catalog", flagCompleter(completeDotted(1)))
 	cmd.Flags().StringVar(&schema, "schema", "", "catalog.schema")
 	return cmd
 }
@@ -206,8 +208,9 @@ func newCacheActionCmd(use, fullOp, incOp, short string) *cobra.Command {
 func newQueriesExecuteCmd() *cobra.Command {
 	var timeout int
 	cmd := &cobra.Command{
-		Use:   "execute ID|NAME",
-		Short: "Run a saved query through the REST API and print its rows",
+		Use:               "execute ID|NAME",
+		ValidArgsFunction: argCompleter(completeQueries),
+		Short:             "Run a saved query through the REST API and print its rows",
 		Long: `Runs the saved query server-side (POST /queries/execute) and prints the rows
 in the usual formats. For ad-hoc SQL, streaming and cancellation use ` + "`peaka sql`" + `.`,
 		Args: cobra.ExactArgs(1),
@@ -357,6 +360,7 @@ func newMetadataRefreshCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&catalog, "catalog", "", "catalog id or name (default: the whole project)")
+	_ = cmd.RegisterFlagCompletionFunc("catalog", flagCompleter(completeDotted(1)))
 	cmd.Flags().StringVar(&callbackURL, "callback-url", "", "URL to call when the job finishes")
 	cmd.Flags().StringVar(&callbackToken, "callback-token", "", "bearer token for the callback")
 	cmd.Flags().BoolVar(&wait, "wait", false, "follow the job until it finishes (needs --catalog)")

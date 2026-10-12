@@ -41,9 +41,10 @@ func newCatalogsCmd() *cobra.Command {
 func newSchemasCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "schemas", Aliases: []string{"schema"}, Short: "Schemas of a catalog"}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "list CATALOG",
-		Short: "List the schemas of a catalog (id or name)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "list CATALOG",
+		ValidArgsFunction: argCompleter(completeDotted(1)),
+		Short:             "List the schemas of a catalog (id or name)",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := map[string]string{}
 			if err := resolveCatalog(rt, args[0], p); err != nil {
@@ -66,10 +67,11 @@ func newSchemasCmd() *cobra.Command {
 
 func newCatalogsDescribeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "describe CATALOG",
-		Aliases: []string{"get"},
-		Short:   "Show one catalog (id or name)",
-		Args:    cobra.ExactArgs(1),
+		Use:               "describe CATALOG",
+		ValidArgsFunction: argCompleter(completeDotted(1)),
+		Aliases:           []string{"get"},
+		Short:             "Show one catalog (id or name)",
+		Args:              cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := map[string]string{}
 			if err := resolveCatalog(rt, args[0], p); err != nil {

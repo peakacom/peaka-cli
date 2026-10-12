@@ -38,6 +38,7 @@ func newProjectsCmd() *cobra.Command {
 		},
 	}
 	list.Flags().StringVar(&workspace, "workspace", "", "only this workspace (id or name)")
+	_ = list.RegisterFlagCompletionFunc("workspace", flagCompleter(completeWorkspaces))
 
 	var cName, cDescription, cWorkspace string
 	create := &cobra.Command{
@@ -92,6 +93,7 @@ func newProjectsCmd() *cobra.Command {
 	create.Flags().StringVar(&cName, "name", "", "project name")
 	create.Flags().StringVar(&cDescription, "description", "", "description")
 	create.Flags().StringVar(&cWorkspace, "workspace", "", "workspace id or name (default: the organization's default workspace)")
+	_ = create.RegisterFlagCompletionFunc("workspace", flagCompleter(completeWorkspaces))
 
 	var uName, uDescription string
 	update := &cobra.Command{
@@ -155,9 +157,10 @@ func newProjectsCmd() *cobra.Command {
 		create,
 		update,
 		&cobra.Command{
-			Use:   "delete ID|NAME",
-			Short: "Delete a project",
-			Args:  cobra.ExactArgs(1),
+			Use:               "delete ID|NAME",
+			ValidArgsFunction: argCompleter(completeProjects),
+			Short:             "Delete a project",
+			Args:              cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				p, orgID, err := rt.projectArg(args)
 				if err != nil {
@@ -182,9 +185,10 @@ func newProjectsCmd() *cobra.Command {
 			},
 		},
 		&cobra.Command{
-			Use:   "use ID|NAME",
-			Short: "Make a project the context of the active configuration",
-			Args:  cobra.ExactArgs(1),
+			Use:               "use ID|NAME",
+			Short:             "Make a project the context of the active configuration",
+			Args:              cobra.ExactArgs(1),
+			ValidArgsFunction: argCompleter(completeProjects),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				p, _, err := rt.projectArg(args)
 				if err != nil {

@@ -215,6 +215,11 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 		newSQLCmd(), newAPICmd(), newMCPCmd(), newSkillCmd(), newVersionCmd(), newUpgradeCmd(),
 	)
 	root.SetHelpCommand(newHelpCmd(root))
+	// Tab completion of the context flags: live names where they are names.
+	_ = root.RegisterFlagCompletionFunc("project", flagCompleter(completeProjects))
+	_ = root.RegisterFlagCompletionFunc("org", flagCompleter(completeOrgs))
+	_ = root.RegisterFlagCompletionFunc("environment", staticCompleter(config.EnvironmentNames()...))
+	_ = root.RegisterFlagCompletionFunc("format", staticCompleter("table", "json", "jsonl", "csv", "tsv", "yaml", "md", "vertical"))
 	return root
 }
 

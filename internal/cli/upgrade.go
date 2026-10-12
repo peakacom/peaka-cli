@@ -170,7 +170,7 @@ func notifyUpdate(cmdName string) {
 		return
 	}
 	switch cmdName {
-	case "upgrade", "version", "mcp", "completion", "help", "":
+	case "upgrade", "version", "mcp", "completion", "__complete", "__completeNoDesc", "help", "":
 		return
 	}
 	last := readUpdateCheck()

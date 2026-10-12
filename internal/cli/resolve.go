@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -50,10 +51,21 @@ func matchOne(rs []record, ref, what string) (record, error) {
 			hits = append(hits, r)
 		}
 	}
+	if len(hits) == 0 {
+		// The same name spelled loosely: case, dashes, underscores and spaces aside.
+		for _, r := range rs {
+			if normalizeName(str(r["name"])) == normalizeName(ref) || normalizeName(str(r["displayName"])) == normalizeName(ref) {
+				hits = append(hits, r)
+			}
+		}
+	}
 	switch len(hits) {
 	case 1:
 		return hits[0], nil
 	case 0:
+		if close := suggestNames(names(rs, "name", "displayName"), ref, 3); len(close) > 0 {
+			return nil, api.Exit(api.ExitNotFound, "no %s with id or name %q; did you mean %s?", what, ref, strings.Join(close, ", "))
+		}
 		return nil, api.Exit(api.ExitNotFound, "no %s with id or name %q", what, ref)
 	}
 	ids := make([]string, 0, len(hits))
@@ -186,4 +198,86 @@ func (r *Runtime) resolveProject(ref string) (record, error) {
 		return nil, err
 	}
 	return matchOne(ps, ref, "project")
+}
+
+// normalizeName folds a name for loose comparison: lower case, letters and
+// digits only ("Google Sheets", "google-sheets" and "GOOGLE_SHEETS" agree).
+func normalizeName(s string) string {
+	var b strings.Builder
+	for _, c := range strings.ToLower(s) {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
+}
+
+// suggestNames picks up to n candidates that look like ref: one contains the
+// other after normalizing, or they are a short edit apart. Closest first.
+func suggestNames(candidates []string, ref string, n int) []string {
+	want := normalizeName(ref)
+	if want == "" {
+		return nil
+	}
+	type scored struct {
+		name  string
+		score int
+	}
+	var out []scored
+	seen := map[string]bool{}
+	for _, c := range candidates {
+		if c == "" || seen[c] {
+			continue
+		}
+		have := normalizeName(c)
+		score := -1
+		switch {
+		case have == want:
+			score = 0
+		case strings.HasPrefix(have, want) || strings.HasPrefix(want, have):
+			score = 1
+		case strings.Contains(have, want) || strings.Contains(want, have):
+			score = 2
+		default:
+			if d := editDistance(have, want); d <= 2 || (len(want) >= 6 && d <= len(want)/3) {
+				score = 3 + d
+			}
+		}
+		if score >= 0 {
+			seen[c] = true
+			out = append(out, scored{c, score})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].score != out[j].score {
+			return out[i].score < out[j].score
+		}
+		return out[i].name < out[j].name
+	})
+	var names []string
+	for i := 0; i < len(out) && i < n; i++ {
+		names = append(names, out[i].name)
+	}
+	return names
+}
+
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	cur := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(rb)]
 }

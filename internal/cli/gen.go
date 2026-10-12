@@ -138,6 +138,7 @@ func (o opSpec) command() *cobra.Command {
 	} else if o.Query {
 		cmd.Flags().StringArrayVarP(&fields, "field", "f", nil, "extra query parameter KEY=VALUE; repeatable")
 	}
+	attachCompletions(cmd, o)
 	return cmd
 }
 
@@ -458,6 +459,17 @@ func resolveCatalog(r *Runtime, ref string, params map[string]string) error {
 		}
 	}
 	if len(hits) == 0 {
+		// spelled loosely (case, dashes, underscores): the same catalog
+		for _, c := range cs {
+			if normalizeName(str(c["name"])) == normalizeName(ref) {
+				hits = append(hits, c)
+			}
+		}
+	}
+	if len(hits) == 0 {
+		if close := suggestNames(names(cs, "name"), ref, 3); len(close) > 0 {
+			return api.Exit(api.ExitNotFound, "no catalog with id or name %q; did you mean %s?", ref, strings.Join(close, ", "))
+		}
 		return api.Exit(api.ExitNotFound, "no catalog with id or name %q", ref)
 	}
 	params["catalog"] = str(hits[0]["id"])
