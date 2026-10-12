@@ -131,6 +131,8 @@ func upgradeHint(manager string) string {
 	switch manager {
 	case "brew":
 		return "brew upgrade peaka"
+	case "scoop":
+		return "scoop update peaka"
 	case "package":
 		return "upgrade the peaka package with your package manager"
 	}

@@ -88,19 +88,66 @@ commands: `\dc` `\dn` `\dt` `\d` `\use` `\x` `\format` `\timing` `\pager`
 
 ## Install
 
-```
-brew install peakacom/tap/peaka                                                  # macOS, Linux
-curl -fsSL https://raw.githubusercontent.com/peakacom/peaka-cli/main/install.sh | sh   # any Unix
-peaka upgrade                                                                    # later releases
-scoop bucket add peaka https://github.com/peakacom/scoop-bucket; scoop install peaka   # Windows
+Pick your platform; each block is complete, including shell completion.
+
+**macOS and Linux with Homebrew**
+
+```sh
+brew install peakacom/tap/peaka
 ```
 
-Releases (archives for macOS, Linux and Windows, deb and rpm packages, with
-`checksums.txt`) are at https://github.com/peakacom/peaka-cli/releases.
-`peaka upgrade` verifies the checksum before replacing the executable; a brew
-install is upgraded with `brew upgrade peaka`. At most once a day a terminal
-session is told when a newer release exists (`PEAKA_NO_UPDATE_CHECK=1` turns
-that off).
+Completion for bash, zsh and fish comes with the cask; open a new shell.
+
+**Linux and macOS without Homebrew**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/peakacom/peaka-cli/main/install.sh | sh
+peaka completion install
+```
+
+The script puts `peaka` in `/usr/local/bin` (or `~/.local/bin` when that is not
+writable; `PEAKA_INSTALL_DIR` chooses) after checking the release's checksum.
+Debian and RPM packages are on the release page too (`peaka_<version>_linux_amd64.deb`,
+`…_arm64.deb`, `….rpm`): download one and `sudo dpkg -i` or `sudo rpm -i` it.
+
+**Windows**
+
+```powershell
+scoop bucket add peaka https://github.com/peakacom/scoop-bucket
+scoop install peaka
+peaka completion install
+```
+
+Without Scoop: download `peaka_<version>_windows_amd64.zip` (or `arm64`) from
+the [release page](https://github.com/peakacom/peaka-cli/releases), put
+`peaka.exe` on your `PATH`, then `peaka completion install`. Use Windows
+Terminal or PowerShell 7 for the SQL session.
+
+**Any platform, by hand**
+
+Every release carries an archive per platform and `checksums.txt`:
+https://github.com/peakacom/peaka-cli/releases. Unpack, put `peaka` on your
+`PATH`, run `peaka completion install`.
+
+**Check**
+
+```sh
+peaka version
+peaka auth login
+```
+
+**Upgrading**
+
+```sh
+peaka upgrade
+```
+
+`peaka upgrade` fetches the latest release, verifies its checksum and replaces
+the executable in place; `peaka upgrade --check` only reports. An install owned
+by a package manager is upgraded through it instead, and `peaka upgrade` says
+so: `brew upgrade peaka`, `scoop update peaka`, or your distribution's package
+tool. At most once a day a terminal session is told when a newer release
+exists (`PEAKA_NO_UPDATE_CHECK=1` turns that off).
 
 ## Build
 

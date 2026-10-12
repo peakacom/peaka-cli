@@ -270,6 +270,8 @@ func Managed(exe string) string {
 	switch {
 	case strings.Contains(p, "/Cellar/") || strings.Contains(p, "/homebrew/") || strings.Contains(p, "/linuxbrew/"):
 		return "brew"
+	case strings.Contains(strings.ToLower(p), "/scoop/apps/") || strings.Contains(strings.ToLower(p), "/scoop/shims/"):
+		return "scoop"
 	case strings.HasPrefix(p, "/usr/bin/") && runtime.GOOS == "linux":
 		return "package" // deb/rpm
 	}
