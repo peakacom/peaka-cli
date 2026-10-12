@@ -217,6 +217,9 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 		newSQLCmd(), newAPICmd(), newMCPCmd(), newSkillCmd(), newVersionCmd(), newUpgradeCmd(),
 	)
 	root.SetHelpCommand(newHelpCmd(root))
+	// Our own completion command: cobra's scripts, plus `completion install`.
+	root.CompletionOptions.DisableDefaultCmd = true
+	root.AddCommand(newCompletionCmd(root))
 	// Tab completion of the context flags: live names where they are names.
 	_ = root.RegisterFlagCompletionFunc("project", flagCompleter(completeProjects))
 	_ = root.RegisterFlagCompletionFunc("org", flagCompleter(completeOrgs))

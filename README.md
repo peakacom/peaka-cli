@@ -49,8 +49,8 @@ is `GOOGLE_SHEETS`); a miss suggests the nearest names. With shell completion
 installed, Tab completes them live: catalogs, `catalog.schema.table` paths,
 connections, queries, folders, projects, workspaces, connection types and the
 context flags (`--project`, `--org`, `--catalog`, `--connection`). The brew
-install sets completion up; otherwise `source <(peaka completion zsh)` (or
-`bash`, `fish`) in your shell profile. `create` and `update` take flags,
+install sets completion up; otherwise `peaka completion install` adds the one
+line your shell needs (bash, zsh, fish or PowerShell) to its profile, once. `create` and `update` take flags,
 `-f KEY=VALUE` / `-f KEY:=JSON` body fields, or `--from-file body.json`.
 Long-running work (`exports`, `metadata refresh`, OAuth connections) has `--wait`;
 with `--no-input` an OAuth `connections create` prints the authorization URL and
