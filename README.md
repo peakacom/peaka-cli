@@ -103,10 +103,12 @@ make sync-spec        # refresh api/openapi.json from the test gateway
 make release-snapshot # every platform into dist/, nothing published (needs goreleaser)
 ```
 
-Go 1.24+. A release is a tag: `git tag v0.2.0 && git push origin v0.2.0` runs
-`.github/workflows/release.yml`, which builds every platform, publishes the
-GitHub Release and pushes the Homebrew cask to `peakacom/homebrew-tap` (the
-`HOMEBREW_TAP_TOKEN` secret must be able to write there).
+Go 1.24+. Releases are cut by hand from a developer machine (no CI):
+`make release VERSION=0.2.0` tests, tags `v0.2.0`, pushes the tag and runs
+goreleaser, which builds every platform, publishes the GitHub Release and
+pushes the Homebrew cask to `peakacom/homebrew-tap`. It needs `goreleaser`
+(`go install github.com/goreleaser/goreleaser/v2@latest`) and a `gh` login
+that can write to both repositories.
 
 ## Configuration
 

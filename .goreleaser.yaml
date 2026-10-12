@@ -1,7 +1,8 @@
-# Releases: a tag v* pushed to github.com/peakacom/peaka-cli builds every
-# platform, publishes the archives with checksums on the GitHub Release, and
-# pushes the Homebrew formula to peakacom/homebrew-tap (brew install
-# peakacom/tap/peaka). `peaka upgrade` reads the same release.
+# Releases: `make release VERSION=x.y.z` (by hand, from a developer machine)
+# builds every platform, publishes the archives with checksums on the GitHub
+# Release of github.com/peakacom/peaka-cli, and pushes the Homebrew cask to
+# peakacom/homebrew-tap (brew install peakacom/tap/peaka). `peaka upgrade`
+# and install.sh read the same release.
 version: 2
 
 project_name: peaka
