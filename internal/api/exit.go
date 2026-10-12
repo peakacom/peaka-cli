@@ -88,7 +88,7 @@ var hintByCode = map[string]string{
 	"AUTHENTICATION_REQUIRED": "run `peaka auth login`, or set PEAKA_API_KEY",
 	"API_KEY_INVALID":         "the key is unknown, expired or deactivated: `peaka auth list`, then `peaka auth login`",
 	"SESSION_EXPIRED":         "run `peaka auth login` again",
-	"OUTSIDE_KEY_SCOPE":       "this key is bound to another project: `peaka me` shows its scope",
+	"OUTSIDE_KEY_SCOPE":       "this kind of key cannot reach this endpoint (another project, or a partner/user-only route): `peaka me` shows the key's kind and scope",
 	"PROJECT_ACCESS_DENIED":   "`peaka projects list` shows the projects this identity reaches",
 	"PERMISSION_REQUIRED":     "ask an organization admin for a role that includes this permission",
 	"VALIDATION_FAILED":       "see the field errors above",

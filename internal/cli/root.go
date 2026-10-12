@@ -60,6 +60,8 @@ type Runtime struct {
 	client    *api.Client
 	catalogs  []record // catalogs of the project in context, once listed
 	connTypes []record // /connections/config, once listed
+
+	identity string // which credential was sent, for 401/403 messages: "PEAKA_API_KEY qlHy…" or "account owner (kLgg…)"
 }
 
 var rt *Runtime
@@ -86,6 +88,10 @@ func reportError(err error) int {
 			p.WriteJSON(stderr)
 		} else {
 			p.WriteHuman(stderr, gf.verbose || gf.debug)
+			// a refused identity: say which one was sent, so a stale env var or the wrong account is obvious
+			if (p.Status == 401 || p.Status == 403) && rt != nil && rt.identity != "" {
+				fmt.Fprintf(stderr, "  key    %s\n", rt.identity)
+			}
 		}
 		return p.ExitCode()
 	case errors.As(err, &se):
@@ -278,6 +284,7 @@ func (r *Runtime) confirm(question string) error {
 // token returns the credential to send: PEAKA_API_KEY wins, else the account's secret.
 func (r *Runtime) token() (string, *config.Account, error) {
 	if k := os.Getenv("PEAKA_API_KEY"); k != "" {
+		r.identity = fmt.Sprintf("PEAKA_API_KEY %s", keyPrefix(k))
 		return k, nil, nil
 	}
 	host := r.Settings.APIHost()
@@ -307,6 +314,7 @@ func (r *Runtime) token() (string, *config.Account, error) {
 	if err != nil {
 		return "", nil, api.Exit(api.ExitAuth, "%v", err)
 	}
+	r.identity = fmt.Sprintf("account %q (%s) for %s", a.Name, keyPrefix(secret), host)
 	return secret, a, nil
 }
 
@@ -343,4 +351,16 @@ func (r *Runtime) needOrg() (string, error) {
 		return "", api.Exit(api.ExitUsage, "no organization in context: `peaka orgs use <name>`, --org, or PEAKA_ORG")
 	}
 	return r.Settings.Org, nil
+}
+
+// keyPrefix shows the public part of an API key (the part before the dot, which
+// the API itself reports as apiKeyPrefix) and hides the secret.
+func keyPrefix(key string) string {
+	if i := strings.IndexByte(key, '.'); i > 0 && i <= 16 {
+		return key[:i] + ".…"
+	}
+	if len(key) <= 4 {
+		return "…"
+	}
+	return key[:4] + "…"
 }
