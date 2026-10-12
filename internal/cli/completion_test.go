@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/peakacom/peaka-cli/internal/sqltext"
 )
 
 func TestNormalizeName(t *testing.T) {
@@ -88,5 +90,38 @@ func TestDottedCompletionStopsAtItsDepth(t *testing.T) {
 		if values != nil || directive != cobra.ShellCompDirectiveNoFileComp {
 			t.Errorf("levels=%d: %v %v", levels, values, directive)
 		}
+	}
+}
+
+func TestMatchesTypedIgnoresQuotes(t *testing.T) {
+	for _, c := range []struct {
+		value, typed string
+		want         bool
+	}{
+		{`peaka."table".customers`, `peaka.table.cu`, true},
+		{`peaka."table".customers`, `peaka."table".cu`, true},
+		{`peaka."table".customers`, `peaka."tab`, true},
+		{`peaka."table".customers`, `peaka."tax`, false},
+		{`"gs_abc"."evliya_çelebi"."2__kitap"`, `gs_abc.evliya_ç`, true},
+		{`"gs_abc"."evliya_çelebi"."2__kitap"`, `"gs_abc"."evli`, true},
+		{`"gs_abc"."evliya_çelebi"."2__kitap"`, `gs_abc.x`, false},
+		{`gs_abc`, `"gs`, true},
+		{`SELECT`, `sel`, true},
+		{`SELECT`, `a.sel`, false},
+		{`anything`, ``, true},
+	} {
+		if got := matchesTyped(c.value, c.typed); got != c.want {
+			t.Errorf("matchesTyped(%s, %s) = %v", c.value, c.typed, got)
+		}
+	}
+}
+
+func TestPathQuotesAsNeededAndAsTyped(t *testing.T) {
+	typed := sqltext.SplitIdents(`"peaka".tab`)
+	if got := path(typed, "peaka", "table", "2__kitap"); got != `"peaka"."table"."2__kitap"` {
+		t.Errorf("path = %s", got)
+	}
+	if got := path(nil, "gs_abc", "evliya_çelebi"); got != `gs_abc."evliya_çelebi"` {
+		t.Errorf("path = %s", got)
 	}
 }

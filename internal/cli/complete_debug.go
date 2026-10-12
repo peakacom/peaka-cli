@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/peakacom/peaka-cli/internal/sqltext"
@@ -31,10 +30,9 @@ func debugComplete(s *sqlSession, text string) error {
 		} else {
 			cands = r.sqlCandidates(ctx)
 		}
-		word := strings.ToLower(ctx.Word)
 		var kept []candidate
 		for _, c := range cands {
-			if word == "" || strings.HasPrefix(strings.ToLower(c.value), word) {
+			if matchesTyped(c.value, ctx.Word) {
 				kept = append(kept, c)
 			}
 		}

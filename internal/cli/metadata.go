@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/peakacom/peaka-cli/internal/sqltext"
 	"net/url"
 	"sort"
-	"strings"
 	"sync"
 )
 
@@ -275,7 +275,10 @@ func (m *metadata) fetchColumns(catalog, schema, table string) error {
 // ResolveTable turns a path as written (possibly unqualified) into catalog, schema, table
 // using the session defaults.
 func (m *metadata) ResolveTable(path, defCatalog, defSchema string) (c, s, t string, ok bool) {
-	parts := strings.Split(strings.ReplaceAll(path, `"`, ""), ".")
+	var parts []string
+	for _, p := range sqltext.SplitIdents(path) {
+		parts = append(parts, p.Name)
+	}
 	switch len(parts) {
 	case 3:
 		return parts[0], parts[1], parts[2], true
