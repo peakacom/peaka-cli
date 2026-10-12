@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -94,5 +95,16 @@ func TestOpSpecArgsAndFlags(t *testing.T) {
 	}
 	if err := cmd.Args(cmd, []string{"f", "q1", "q2"}); err != nil {
 		t.Errorf("variadic args: %v", err)
+	}
+}
+
+// The skill file agents install is the one shipped in docs/ (the archives carry docs/SKILL.md).
+func TestSkillFileMatchesDocs(t *testing.T) {
+	docs, err := os.ReadFile("../../docs/SKILL.md")
+	if err != nil {
+		t.Skip("docs/SKILL.md not beside the package")
+	}
+	if string(docs) != skillFile {
+		t.Fatal("internal/cli/skill.md and docs/SKILL.md differ; copy one over the other")
 	}
 }

@@ -134,15 +134,17 @@ func runBrowserLogin(o browserLoginOptions) error {
 		fmt.Fprintln(rt.Err, "cancelled")
 		return api.Exit(api.ExitAuth, "login refused: %s%s", res["error"], suffix(res["desc"]))
 	}
-	// The studio login page appends "?ref=…" to the URL it returns to, which lands
-	// inside the state when the user had to log in first; accept that suffix.
+	// When the person had to log in first, studio's login page returns to the
+	// authorization URL with "?ref=<how they logged in>" appended, which lands
+	// inside the state (its last parameter) and comes back that way. The state
+	// is ours as long as it starts with what we sent; what follows is theirs.
 	got := res["state"]
-	if i := strings.Index(got, "?ref="); i > 0 {
-		got = got[:i]
-	}
-	if got != state {
+	if got != state && !strings.HasPrefix(got, state) {
 		fmt.Fprintln(rt.Err, "failed")
-		return api.Exit(api.ExitAuth, "login redirect carried an unexpected state; try again")
+		if gf.debug {
+			fmt.Fprintf(rt.Err, "  state sent %q, received %q\n", state, got)
+		}
+		return api.Exit(api.ExitAuth, "login redirect carried an unexpected state; try again (--debug shows what came back)")
 	}
 	tokens, err := oc.Exchange(ctx, clientID, redirectURI, res["code"], pkce)
 	if err != nil {

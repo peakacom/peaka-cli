@@ -212,7 +212,7 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 		newConnectionsCmd(), newCatalogsCmd(), newSchemasCmd(), newTablesCmd(), newCacheCmd(),
 		newQueriesCmd(), newFoldersCmd(), newExportsCmd(), newSemanticCatalogsCmd(), newParametricTablesCmd(),
 		newMetadataCmd(), newAICmd(), newDriversCmd(), newEmbedCmd(),
-		newSQLCmd(), newAPICmd(), newMCPCmd(), newVersionCmd(), newUpgradeCmd(),
+		newSQLCmd(), newAPICmd(), newMCPCmd(), newSkillCmd(), newVersionCmd(), newUpgradeCmd(),
 	)
 	root.SetHelpCommand(newHelpCmd(root))
 	return root

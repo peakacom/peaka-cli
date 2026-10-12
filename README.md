@@ -179,5 +179,15 @@ claude mcp add peaka -- peaka mcp serve --project <id>
 Tools: `peaka_sql`, `peaka_run` (any command line), and one tool per common
 operation (catalogs, schemas, tables, columns, queries, caches, metadata,
 connections, semantic catalogs, exports). Resources: `peaka://guide` and
-`peaka://sql-rules`. `docs/SKILL.md` is the skill file for agents that load
-skills from disk.
+`peaka://sql-rules`.
+
+## Skill
+
+The skill (`docs/SKILL.md`, also inside the binary) is the short guide an AI
+coding agent loads when a task mentions Peaka. Put it where your agent looks:
+
+```
+peaka skill install                                  # Claude Code, for you: ~/.claude/skills/peaka/SKILL.md
+peaka skill install --agent claude,codex,cursor --project-dir .   # in this repository, for the team
+peaka skill show                                     # print it
+```
