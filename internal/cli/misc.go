@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -244,7 +245,7 @@ in the usual formats. For ad-hoc SQL, streaming and cancellation use ` + "`peaka
 				vals := make([]any, len(g.Columns))
 				for i, cell := range row {
 					if i < len(vals) {
-						vals[i] = cell.Value
+						vals[i] = typedCell(cell.DataType, cell.Value)
 						if g.Types[i] == "" {
 							g.Types[i] = cell.DataType
 						}
@@ -601,4 +602,33 @@ func newFoldersTreeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&withQueries, "queries", false, "include the queries of each folder")
 	cmd.Flags().StringVar(&root, "root", "", "start from this folder (id or path)")
 	return cmd
+}
+
+// typedCell turns the string a CELL_TYPED answer carries into the value its
+// type names, so JSON output has numbers and booleans as `peaka sql` does.
+// Decimals stay strings (no precision loss), as they do over dbc.
+func typedCell(dataType string, v any) any {
+	s, ok := v.(string)
+	if !ok {
+		return v
+	}
+	t := strings.ToLower(dataType)
+	if i := strings.IndexByte(t, '('); i > 0 {
+		t = t[:i]
+	}
+	switch t {
+	case "bigint", "integer", "int", "smallint", "tinyint":
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return n
+		}
+	case "double", "real", "float":
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f
+		}
+	case "boolean":
+		if b, err := strconv.ParseBool(s); err == nil {
+			return b
+		}
+	}
+	return v
 }
