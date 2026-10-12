@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/peakacom/peaka-cli/internal/api"
 	"github.com/peakacom/peaka-cli/internal/config"
@@ -76,6 +77,7 @@ func reportError(err error) int {
 	stderr := os.Stderr
 	var p *api.Problem
 	var xe *api.ExitError
+	var se *sqlError
 	switch {
 	case errors.As(err, &p):
 		if rt != nil && !rt.StdoutTTY || (rt != nil && rt.Settings != nil && rt.Settings.Format == "json") {
@@ -84,6 +86,13 @@ func reportError(err error) int {
 			p.WriteHuman(stderr, gf.verbose || gf.debug)
 		}
 		return p.ExitCode()
+	case errors.As(err, &se):
+		if rt != nil && !rt.StdoutTTY || (rt != nil && rt.Settings != nil && rt.Settings.Format == "json") {
+			se.problem().WriteJSON(stderr)
+		} else {
+			se.writeHuman(stderr)
+		}
+		return se.exitCode()
 	case errors.As(err, &xe):
 		fmt.Fprintf(stderr, "ERROR  %s\n", xe.Err)
 		return xe.Code
@@ -134,7 +143,7 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 	root.AddCommand(
 		newAuthCmd(), newConfigCmd(), newMeCmd(),
 		newOrgsCmd(), newWorkspacesCmd(), newProjectsCmd(),
-		newAPICmd(), newVersionCmd(),
+		newSQLCmd(), newAPICmd(), newVersionCmd(),
 	)
 	root.SetHelpCommand(newHelpCmd(root))
 	return root
@@ -177,6 +186,11 @@ func initRuntime(cmd *cobra.Command) error {
 // outputOptions builds the printer options from the global flags.
 func (r *Runtime) outputOptions() output.Options {
 	o := output.Options{Format: r.Settings.Format, JQ: gf.jq, NoHeader: gf.noHeader, NoTruncate: gf.noTruncate}
+	if r.StdoutTTY {
+		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+			o.Width = w
+		}
+	}
 	if gf.fields != "" {
 		for _, f := range strings.Split(gf.fields, ",") {
 			if f = strings.TrimSpace(f); f != "" {

@@ -3,6 +3,11 @@
 `peaka` is Peaka's CLI. Grammar: `peaka <resource> <verb> [args] [flags]`.
 Verbs: `list`, `describe`, `create`, `update`, `delete`, `use`. Resources: `orgs`, `workspaces`, `projects`
 (more arrive with each release; `peaka help --format json` lists the full tree with every flag).
+SQL: `peaka sql "STATEMENT"` runs Trino SQL on the project in context; `--format jsonl` streams rows,
+`--max-rows N` caps them, `--query-timeout 30s` bounds the run. Qualify tables as `catalog.schema.table`
+(quote reserved words: `peaka."table".customers`). `SHOW CATALOGS`, `SHOW SCHEMAS FROM c`,
+`SHOW TABLES FROM c.s`, `DESCRIBE c.s.t` discover the data. A failed query is exit 8 with
+`code: QUERY_FAILED` and `params.errorName`, `params.line`, `params.column` when known.
 
 ## Rules
 1. You never get a prompt: when stdin is not a terminal, `--no-input` is on. A missing value is exit 6 with the field named; a destructive command without `--yes` is exit 2.

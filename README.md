@@ -13,9 +13,35 @@ peaka projects list                         # table on a terminal, JSON in a pip
 peaka api GET /connections/config --jq length
 ```
 
-Design document: see the Peaka CLI Tasarımı doc (internal). Phase 0 — the
-skeleton — is what this tree holds today: configurations, API-key identities,
-`orgs`/`workspaces`/`projects`, `api`, output formats, exit codes.
+Design document: see the Peaka CLI Tasarımı doc (internal). This tree holds
+phase 0 (configurations, API-key identities, `orgs`/`workspaces`/`projects`,
+`api`, output formats, exit codes) and phase 2 (`peaka sql`).
+
+## SQL
+
+`peaka sql` speaks Trino's HTTP protocol to the `dbc` endpoint — the same path
+the JDBC, Python and Node drivers take — so progress, cancellation (Ctrl-C),
+`USE`, session properties and error positions all come from the engine.
+
+```
+peaka sql "SELECT * FROM stripe.payment.charges LIMIT 10"
+peaka sql -f report.sql --format csv > out.csv
+cat q.sql | peaka sql --format jsonl | jq .amount
+peaka sql --catalog stripe --schema payment "SELECT count(*) FROM charges"
+peaka sql --explain "SELECT ..."         # the plan, as text
+peaka sql "SELECT ..." --stats             # statistics on stderr
+peaka sql                                  # interactive session
+```
+
+On a terminal the first 1000 rows are shown (`--max-rows 0` for all) and
+wide tables are fitted to the terminal; in a pipe every row streams. Several
+statements separated by `;` run in order.
+
+The interactive session has multi-line editing (Enter runs a statement ending
+in `;`), syntax highlighting, history, and Tab completion of catalogs,
+schemas, tables, columns (by alias too), keywords and functions. Meta
+commands: `\dc` `\dn` `\dt` `\d` `\use` `\x` `\format` `\timing` `\pager`
+`\max-rows` `\o` `\i` `\e` `\refresh` `\project` `\stats` `\explain` `\?` `\q`.
 
 ## Build
 
