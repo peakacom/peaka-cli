@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"os"
@@ -133,6 +134,14 @@ func (r *Runtime) connectionTypes() ([]record, error) {
 	ts, err := r.listRecords("/connections/config", nil, "")
 	if err != nil {
 		return nil, err
+	}
+	for _, t := range ts {
+		// the catalogue carries HTML entities ("CRM &amp; ERP")
+		for _, k := range []string{"category", "connectionTypeLabel", "name"} {
+			if s, ok := t[k].(string); ok {
+				t[k] = html.UnescapeString(s)
+			}
+		}
 	}
 	r.connTypes = ts
 	return ts, nil
@@ -606,9 +615,11 @@ func prompt(label, def string) (string, error) {
 	}
 	var line string
 	buf := make([]byte, 1)
+	ended := false
 	for {
 		n, err := rt.In.Read(buf)
 		if n == 0 || err != nil {
+			ended = true
 			break
 		}
 		if buf[0] == '\n' {
@@ -617,6 +628,10 @@ func prompt(label, def string) (string, error) {
 		line += string(buf[0])
 	}
 	line = strings.TrimSpace(line)
+	if ended && line == "" {
+		fmt.Fprintln(rt.Err)
+		return "", api.Exit(api.ExitUsage, "no input to answer %q with; pass it as a flag, or run on a terminal", label)
+	}
 	if line == "" {
 		line = def
 	}
@@ -655,12 +670,26 @@ func promptConnectionType() (record, error) {
 		return nil, err
 	}
 	for attempt := 0; attempt < 5; attempt++ {
-		answer, err := prompt("Connection type (? lists them)", "")
+		answer, err := prompt("Connection type (? for help)", "")
 		if err != nil {
 			return nil, err
 		}
-		if answer == "?" || answer == "" {
-			listConnectionTypes(ts, "")
+		if answer == "" {
+			continue
+		}
+		if strings.HasPrefix(answer, "?") {
+			if word := strings.TrimSpace(answer[1:]); word != "" {
+				// "?sheets": the types that mention the word
+				found := containingConnectionTypes(ts, word, 40)
+				if len(found) == 0 {
+					fmt.Fprintf(rt.Err, "No connection type mentions %q.\n", word)
+				}
+				for _, ct := range found {
+					fmt.Fprintf(rt.Err, "  %-28s %s\n", ct, labelOf(ts, ct))
+				}
+			} else {
+				describeConnectionTypes(ts)
+			}
 			continue
 		}
 		t, err := rt.connectionType(answer)
@@ -734,6 +763,26 @@ func labelOf(ts []record, connectionType string) string {
 		}
 	}
 	return ""
+}
+
+// describeConnectionTypes says how many types there are, by category, and how to find one.
+func describeConnectionTypes(ts []record) {
+	counts := map[string]int{}
+	for _, t := range ts {
+		counts[str(t["category"])]++
+	}
+	var cats []string
+	for c := range counts {
+		cats = append(cats, c)
+	}
+	sort.Strings(cats)
+	var parts []string
+	for _, c := range cats {
+		parts = append(parts, fmt.Sprintf("%s (%d)", c, counts[c]))
+	}
+	fmt.Fprintf(rt.Err, "%d connection types: %s.\n", len(ts), strings.Join(parts, ", "))
+	fmt.Fprintln(rt.Err, "Type a name or a word of it (sheets, postgres); ?word lists the types that mention it;")
+	fmt.Fprintln(rt.Err, "`peaka connections types list --category Database` lists a category.")
 }
 
 // listConnectionTypes prints the types, one per line, for a person choosing one.

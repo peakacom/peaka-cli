@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/peakacom/peaka-cli/internal/build"
 )
 
@@ -238,12 +240,11 @@ func (c *Client) debugf(format string, args ...any) {
 }
 
 // IsTerminal reports whether f is a terminal (used for default formats and prompts).
+// IsTerminal says whether f is an interactive terminal. A character-device
+// check is not enough: /dev/null is one too, and a prompt read from it ends
+// at once.
 func IsTerminal(f *os.File) bool {
-	fi, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 func firstNonEmptyString(xs ...string) string {
