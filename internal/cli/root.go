@@ -91,6 +91,10 @@ func reportError(err error) int {
 			// a refused identity: say which one was sent, so a stale env var or the wrong account is obvious
 			if (p.Status == 401 || p.Status == 403) && rt != nil && rt.identity != "" {
 				fmt.Fprintf(stderr, "  key    %s\n", rt.identity)
+				fmt.Fprintf(stderr, "  api    %s  (environment %s, from %s)\n", rt.Settings.API, rt.Settings.Environment, rt.Settings.Source["environment"])
+				if p.Status == 401 && rt.Settings.Source["environment"] == "default" {
+					fmt.Fprintf(stderr, "  hint   a key from another environment? `peaka config set environment test` (or eu), or --environment\n")
+				}
 			}
 		}
 		return p.ExitCode()

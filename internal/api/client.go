@@ -156,6 +156,20 @@ func parseProblem(resp *http.Response, data []byte) *Problem {
 	p := &Problem{Status: resp.StatusCode, Raw: append([]byte(nil), data...)}
 	if json.Valid(data) {
 		_ = json.Unmarshal(data, p)
+		if p.Code == "" {
+			// not a problem+json body (an older gateway, a proxy): keep its message, not the whole object
+			var generic struct {
+				Message string `json:"message"`
+				Error   string `json:"error"`
+				Path    string `json:"path"`
+			}
+			if json.Unmarshal(data, &generic) == nil {
+				p.Detail = firstNonEmptyString(generic.Message, generic.Error)
+				if p.Instance == "" {
+					p.Instance = generic.Path
+				}
+			}
+		}
 	}
 	if p.Status == 0 {
 		p.Status = resp.StatusCode
@@ -214,4 +228,13 @@ func IsTerminal(f *os.File) bool {
 		return false
 	}
 	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func firstNonEmptyString(xs ...string) string {
+	for _, x := range xs {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
 }
