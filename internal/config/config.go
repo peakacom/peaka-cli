@@ -22,6 +22,7 @@ type Configuration struct {
 	API         string `yaml:"api,omitempty"`
 	DBC         string `yaml:"dbc,omitempty"`
 	OAuth       string `yaml:"oauth,omitempty"`
+	Studio      string `yaml:"studio,omitempty"`
 	Account     string `yaml:"account,omitempty"`
 	Org         string `yaml:"org,omitempty"`
 	Project     string `yaml:"project,omitempty"`
@@ -31,7 +32,7 @@ type Configuration struct {
 }
 
 // Properties lists every settable key, in display order.
-var Properties = []string{"environment", "api", "dbc", "oauth", "account", "org", "project", "format", "color", "pager"}
+var Properties = []string{"environment", "api", "dbc", "oauth", "studio", "account", "org", "project", "format", "color", "pager"}
 
 const DefaultName = "default"
 
@@ -174,6 +175,8 @@ func (c *Configuration) Get(key string) (string, error) {
 		return c.DBC, nil
 	case "oauth":
 		return c.OAuth, nil
+	case "studio":
+		return c.Studio, nil
 	case "account":
 		return c.Account, nil
 	case "org":
@@ -200,12 +203,14 @@ func (c *Configuration) Set(key, value string) error {
 			}
 		}
 		c.Environment = value
-	case "api", "dbc", "oauth":
+	case "api", "dbc", "oauth", "studio":
 		if value != "" && !strings.HasPrefix(value, "http://") && !strings.HasPrefix(value, "https://") {
 			return fmt.Errorf("%s: a URL starting with https:// (or http:// for local use)", key)
 		}
 		value = strings.TrimRight(value, "/")
-		if key == "oauth" {
+		if key == "studio" {
+			c.Studio = value
+		} else if key == "oauth" {
 			c.OAuth = value
 		} else if key == "api" {
 			c.API = value

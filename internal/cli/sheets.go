@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,14 +14,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/peakacom/peaka-cli/internal/api"
+	"github.com/peakacom/peaka-cli/internal/oauth"
 )
 
 // Connectors that read files the account picks (Google Sheets today): a
 // catalog needs the picked files in extraParameters.sheets. The studio opens
-// Google's file picker for that; the CLI does the same from a page it serves
-// on the loopback address, with the credentials the API hands out, or takes
-// the spreadsheets as --sheet flags (an id or a Google Sheets URL, with an
-// optional =name) for scripts and agents.
+// Google's file picker for that, with the connection's own Google token. The
+// CLI opens the studio's picker page in the browser, which sends the picks to
+// the loopback address the CLI listens on; the token never leaves the studio.
+// Scripts and agents pass --sheet ID|URL[=name] instead.
 
 // pickedFile is one picked spreadsheet, as the catalog wants it.
 type pickedFile struct {
@@ -61,8 +61,7 @@ func sheetsSetter(v any, body map[string]any) {
 	for _, s := range vals {
 		f, err := parseSheetFlag(s)
 		if err != nil {
-			// reported again, with the flag named, when the request is prepared
-			continue
+			continue // reported, with the flag named, when the request is prepared
 		}
 		files = append(files, f)
 	}
@@ -104,68 +103,64 @@ func prepareFilePicks(c *callCtx) error {
 	return nil
 }
 
-// pickerCredential is what GET /connections/{p}/{c}/picker answers.
-type pickerCredential struct {
-	Provider    string `json:"provider"`
-	AccessToken string `json:"accessToken"`
-	ClientID    string `json:"clientId"`
-	APIKey      string `json:"apiKey"`
-	Picks       string `json:"picks"`
-}
-
-// pickFiles opens Google's file picker in the browser from a page served on
-// the loopback address and returns what the person picked.
+// pickFiles opens the studio's picker page for the connection in the browser
+// and waits for the picks on the loopback address.
 func (r *Runtime) pickFiles(connectionID, connectionName string) ([]pickedFile, error) {
 	project, err := r.needProject()
 	if err != nil {
 		return nil, err
 	}
-	client, err := r.api()
+	if r.Settings.Studio == "" {
+		return nil, api.Exit(api.ExitUsage, "no studio address for this configuration: `peaka config set studio URL`, or pass --sheet")
+	}
+	nonce, err := oauth.RandomState()
 	if err != nil {
 		return nil, err
-	}
-	var cred pickerCredential
-	if err := client.Get(r.Ctx, fmt.Sprintf("/connections/%s/%s/picker", project, url.PathEscape(connectionID)), nil, &cred); err != nil {
-		return nil, err
-	}
-	if cred.AccessToken == "" || cred.APIKey == "" {
-		return nil, api.Exit(api.ExitFailure, "the API gave no picker credentials for connection %s", connectionName)
 	}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, api.Exit(api.ExitFailure, "cannot listen for the picker: %v", err)
+		return nil, api.Exit(api.ExitFailure, "cannot listen for the picks: %v", err)
 	}
 	defer lis.Close()
-	origin := "http://" + lis.Addr().String()
-	picked := make(chan []pickedFile, 1)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/" {
+	port := lis.Addr().(*net.TCPAddr).Port
+	page := fmt.Sprintf("%s/connections/pick/%s/%s/%d/%s", strings.TrimRight(r.Settings.Studio, "/"), url.PathEscape(project), url.PathEscape(connectionID), port, nonce)
+
+	type answer struct {
+		files     []pickedFile
+		cancelled bool
+	}
+	picked := make(chan answer, 1)
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/picked" {
 			http.NotFound(w, req)
 			return
 		}
+		q := req.URL.Query()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = pickerPage.Execute(w, map[string]string{"Token": cred.AccessToken, "APIKey": cred.APIKey, "ClientID": cred.ClientID, "Connection": connectionName, "Origin": origin})
-	})
-	mux.HandleFunc("/picked", func(w http.ResponseWriter, req *http.Request) {
-		var files []pickedFile
-		if err := json.NewDecoder(req.Body).Decode(&files); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if q.Get("nonce") != nonce {
+			fmt.Fprint(w, callbackPage("Not for this terminal", "These picks were not asked for by this command."))
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		var files []pickedFile
+		if s := q.Get("sheets"); s != "" {
+			_ = json.Unmarshal([]byte(s), &files)
+		}
+		if q.Get("cancelled") != "" || len(files) == 0 {
+			fmt.Fprint(w, callbackPage("Nothing picked", "No spreadsheet was picked. You can close this window."))
+		} else {
+			fmt.Fprint(w, callbackPage("Picked", fmt.Sprintf("%d spreadsheet(s) go to the terminal. You can close this window.", len(files))))
+		}
 		select {
-		case picked <- files:
+		case picked <- answer{files: files, cancelled: q.Get("cancelled") != "" || len(files) == 0}:
 		default:
 		}
-	})
-	srv := &http.Server{Handler: mux}
+	})}
 	go srv.Serve(lis)
 	defer srv.Shutdown(context.Background())
 
 	fmt.Fprintf(r.Err, "Pick the spreadsheets for %s in your browser", connectionName)
-	if err := openBrowser(origin); err != nil {
-		fmt.Fprintf(r.Err, ":\n  %s\n", origin)
+	if err := openBrowser(page); err != nil {
+		fmt.Fprintf(r.Err, ":\n  %s\n", page)
 	} else {
 		fmt.Fprintln(r.Err, " …")
 	}
@@ -173,13 +168,13 @@ func (r *Runtime) pickFiles(connectionID, connectionName string) ([]pickedFile, 
 	wait, cancel := context.WithTimeout(r.Ctx, 10*time.Minute)
 	defer cancel()
 	select {
-	case files := <-picked:
-		if len(files) == 0 {
+	case a := <-picked:
+		if a.cancelled {
 			fmt.Fprintln(r.Err, "cancelled")
 			return nil, api.Exit(api.ExitUsage, "no spreadsheet picked")
 		}
-		fmt.Fprintf(r.Err, "✓ %d picked\n", len(files))
-		return files, nil
+		fmt.Fprintf(r.Err, "✓ %d picked\n", len(a.files))
+		return a.files, nil
 	case <-wait.Done():
 		fmt.Fprintln(r.Err)
 		if r.Ctx.Err() != nil {
@@ -189,51 +184,13 @@ func (r *Runtime) pickFiles(connectionID, connectionName string) ([]pickedFile, 
 	}
 }
 
-// pickerPage runs Google's picker the way the studio does (spreadsheets view,
-// shared drives, several files) and posts the picks back to the CLI.
-var pickerPage = template.Must(template.New("picker").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Peaka · pick spreadsheets</title>
-<style>body{font-family:-apple-system,Segoe UI,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;color:#222}
-h1{font-size:1.3rem}button{font-size:1rem;padding:.6rem 1.2rem;border-radius:.4rem;border:1px solid #888;background:#fff;cursor:pointer}
-p.muted{color:#666}</style></head>
-<body><h1>Pick the spreadsheets for connection {{.Connection}}</h1>
-<p class="muted">Google's file picker opens here. Pick one or more spreadsheets; the terminal continues when you are done.</p>
-<button id="open">Open the picker again</button>
-<p id="status" class="muted"></p>
-<script src="https://apis.google.com/js/api.js"></script>
-<script>
-const token = {{.Token}}, apiKey = {{.APIKey}}, origin = {{.Origin}};
-const status = document.getElementById('status');
-function send(files) {
-  fetch('/picked', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(files)})
-    .then(() => { status.textContent = files.length ? 'Picked ' + files.length + ' spreadsheet(s). You can close this window.' : 'Cancelled. You can close this window.'; });
-}
-function openPicker() {
-  const view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS).setIncludeFolders(true).setSelectFolderEnabled(false);
-  const picker = new google.picker.PickerBuilder()
-    .setOAuthToken(token).setDeveloperKey(apiKey).setOrigin(origin)
-    .enableFeature(google.picker.Feature.MULTISELECT_ENABLED).enableFeature(google.picker.Feature.SUPPORT_DRIVES)
-    .addView(view)
-    .setCallback((data) => {
-      if (data.action === google.picker.Action.PICKED) {
-        send(data.docs.filter(d => d.mimeType === 'application/vnd.google-apps.spreadsheet').map(d => ({id: d.id, name: d.name})));
-      } else if (data.action === google.picker.Action.CANCEL) {
-        send([]);
-      }
-    }).build();
-  picker.setVisible(true);
-}
-gapi.load('picker', {callback: openPicker, onerror: () => { status.textContent = 'Google\'s picker could not be loaded.'; }});
-document.getElementById('open').onclick = openPicker;
-</script></body></html>`))
-
 // newConnectionsPickCmd lets a person pick a connection's files ahead of time;
 // the result is what --sheet / extraParameters.sheets take.
 func newConnectionsPickCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pick ID|NAME",
 		Short: "Pick the files a connection reads (Google Sheets) in the browser",
-		Long: `Opens the provider's file picker in your browser for a connection whose data
+		Long: `Opens the studio's file picker in your browser for a connection whose data
 lives in files the account chooses (Google Sheets), and prints the picks as the
 catalog wants them: a list of {id, name}. 'peaka catalogs create --connection X'
 runs the same picker itself on a terminal; a script passes --sheet ID|URL[=name]
