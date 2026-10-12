@@ -73,11 +73,29 @@ func Execute() int {
 	root := newRoot()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := root.ExecuteContext(ctx)
-	if err == nil {
-		return api.ExitOK
+	cmd, err := root.ExecuteContextC(ctx)
+	code := api.ExitOK
+	if err != nil {
+		code = reportError(err)
 	}
-	return reportError(err)
+	if ctx.Err() == nil {
+		notifyUpdate(topLevelName(cmd))
+	}
+	return code
+}
+
+// topLevelName is the first word after "peaka" of the command that ran.
+func topLevelName(cmd *cobra.Command) string {
+	if cmd == nil {
+		return ""
+	}
+	for cmd.HasParent() && cmd.Parent().HasParent() {
+		cmd = cmd.Parent()
+	}
+	if !cmd.HasParent() {
+		return ""
+	}
+	return cmd.Name()
 }
 
 func reportError(err error) int {
@@ -194,7 +212,7 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 		newConnectionsCmd(), newCatalogsCmd(), newSchemasCmd(), newTablesCmd(), newCacheCmd(),
 		newQueriesCmd(), newFoldersCmd(), newExportsCmd(), newSemanticCatalogsCmd(), newParametricTablesCmd(),
 		newMetadataCmd(), newAICmd(), newDriversCmd(), newEmbedCmd(),
-		newSQLCmd(), newAPICmd(), newMCPCmd(), newVersionCmd(),
+		newSQLCmd(), newAPICmd(), newMCPCmd(), newVersionCmd(), newUpgradeCmd(),
 	)
 	root.SetHelpCommand(newHelpCmd(root))
 	return root

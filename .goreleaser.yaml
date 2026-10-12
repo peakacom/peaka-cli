@@ -1,0 +1,120 @@
+# Releases: a tag v* pushed to github.com/peakacom/peaka-cli builds every
+# platform, publishes the archives with checksums on the GitHub Release, and
+# pushes the Homebrew formula to peakacom/homebrew-tap (brew install
+# peakacom/tap/peaka). `peaka upgrade` reads the same release.
+version: 2
+
+project_name: peaka
+
+before:
+  hooks:
+    - go mod tidy
+    # shell completions, packed into every archive and installed by the cask
+    - mkdir -p completions
+    - sh -c "go run ./cmd/peaka completion bash > completions/peaka.bash"
+    - sh -c "go run ./cmd/peaka completion zsh > completions/peaka.zsh"
+    - sh -c "go run ./cmd/peaka completion fish > completions/peaka.fish"
+
+builds:
+  - id: peaka
+    main: ./cmd/peaka
+    binary: peaka
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/peakacom/peaka-cli/internal/build.Version={{ .Version }}
+      - -X github.com/peakacom/peaka-cli/internal/build.Commit={{ .ShortCommit }}
+
+archives:
+  - id: peaka
+    formats: [tar.gz]
+    # peaka_1.2.3_darwin_arm64.tar.gz — what `peaka upgrade` and install.sh look for
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - docs/SKILL.md
+      - completions/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs"
+      - "^ci"
+      - "^chore"
+
+release:
+  github:
+    owner: peakacom
+    name: peaka-cli
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```sh
+    brew install peakacom/tap/peaka            # macOS, Linux
+    curl -fsSL https://raw.githubusercontent.com/peakacom/peaka-cli/main/install.sh | sh
+    peaka upgrade                              # from an earlier release
+    ```
+
+# The Homebrew cask (what brew uses for prebuilt binaries) goes to the tap.
+# Without HOMEBREW_TAP_TOKEN (a token that may write to peakacom/homebrew-tap)
+# the cask is only written into dist/, not pushed.
+homebrew_casks:
+  - name: peaka
+    ids: [peaka]
+    binaries: [peaka]
+    repository:
+      owner: peakacom
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    commit_author:
+      name: peaka-release
+      email: dev@peaka.com
+    commit_msg_template: "peaka {{ .Tag }}"
+    homepage: https://www.peaka.com
+    description: "Peaka from the terminal: the public API, a SQL session over dbc, MCP tools for agents"
+    license: Apache-2.0
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}auto{{ else }}true{{ end }}'
+    completions:
+      bash: completions/peaka.bash
+      zsh: completions/peaka.zsh
+      fish: completions/peaka.fish
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/peaka"]
+          end
+
+nfpms:
+  - id: packages
+    package_name: peaka
+    ids: [peaka]
+    vendor: Peaka
+    homepage: https://www.peaka.com
+    maintainer: Peaka <dev@peaka.com>
+    description: "Peaka from the terminal: the public API, a SQL session over dbc, MCP tools for agents"
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin

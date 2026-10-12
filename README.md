@@ -79,15 +79,34 @@ schemas, tables, columns (by alias too), keywords and functions. Meta
 commands: `\dc` `\dn` `\dt` `\d` `\use` `\x` `\format` `\timing` `\pager`
 `\max-rows` `\o` `\i` `\e` `\refresh` `\project` `\stats` `\explain` `\?` `\q`.
 
+## Install
+
+```
+brew install peakacom/tap/peaka                                                  # macOS, Linux
+curl -fsSL https://raw.githubusercontent.com/peakacom/peaka-cli/main/install.sh | sh   # any Unix
+peaka upgrade                                                                    # later releases
+```
+
+Releases (archives for macOS, Linux and Windows, deb and rpm packages, with
+`checksums.txt`) are at https://github.com/peakacom/peaka-cli/releases.
+`peaka upgrade` verifies the checksum before replacing the executable; a brew
+install is upgraded with `brew upgrade peaka`. At most once a day a terminal
+session is told when a newer release exists (`PEAKA_NO_UPDATE_CHECK=1` turns
+that off).
+
 ## Build
 
 ```
 make build            # bin/peaka
 make test
 make sync-spec        # refresh api/openapi.json from the test gateway
+make release-snapshot # every platform into dist/, nothing published (needs goreleaser)
 ```
 
-Go 1.24+.
+Go 1.24+. A release is a tag: `git tag v0.2.0 && git push origin v0.2.0` runs
+`.github/workflows/release.yml`, which builds every platform, publishes the
+GitHub Release and pushes the Homebrew cask to `peakacom/homebrew-tap` (the
+`HOMEBREW_TAP_TOKEN` secret must be able to write there).
 
 ## Configuration
 
