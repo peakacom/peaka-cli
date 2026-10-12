@@ -128,4 +128,21 @@ when there is none or `PEAKA_CREDENTIALS_STORE=file`.
   commands need `--yes` there.
 
 `peaka help --agent` prints the short guide for AI agents;
-`peaka help --format json` prints the whole command tree.
+`peaka help --format json` prints the whole command tree. `--dry-run` prints
+the request a writing command would send; `--if-not-exists` makes a create
+succeed when the thing exists.
+
+## MCP
+
+`peaka mcp serve` exposes the CLI as Model Context Protocol tools over stdio,
+one server per configuration/project:
+
+```
+claude mcp add peaka -- peaka mcp serve --project <id>
+```
+
+Tools: `peaka_sql`, `peaka_run` (any command line), and one tool per common
+operation (catalogs, schemas, tables, columns, queries, caches, metadata,
+connections, semantic catalogs, exports). Resources: `peaka://guide` and
+`peaka://sql-rules`. `docs/SKILL.md` is the skill file for agents that load
+skills from disk.

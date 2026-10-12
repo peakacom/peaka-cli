@@ -70,6 +70,12 @@ Without a statement on a terminal, the interactive session starts.`,
 			if f.completeAt {
 				return debugComplete(s, text)
 			}
+			if gf.dryRun {
+				for _, st := range sqltext.Split(text) {
+					fmt.Fprintf(rt.Out, "{\"dryRun\":true,\"dbc\":%q,\"project\":%q,\"statement\":%q}\n", rt.Settings.DBC, s.project, st.Text)
+				}
+				return nil
+			}
 			return s.runScript(text)
 		},
 	}

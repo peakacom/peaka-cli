@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -289,7 +290,10 @@ func (r *Runtime) call(method, path string, query url.Values, body any, unwrap s
 	var raw []byte
 	resp, err := client.Do(r.Ctx, method, path, query, body, &raw)
 	if err != nil {
-		return err
+		return r.tolerateConflict(err)
+	}
+	if resp.Status == 0 { // --dry-run printed the request
+		return nil
 	}
 	if len(strings.TrimSpace(string(raw))) == 0 {
 		if empty != "" {
@@ -696,4 +700,14 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// tolerateConflict turns a 409 into success under --if-not-exists.
+func (r *Runtime) tolerateConflict(err error) error {
+	var p *api.Problem
+	if gf.ifNotExists && asProblem(err, &p) && p.Status == http.StatusConflict {
+		r.note("Already exists (%s); continuing because of --if-not-exists.", p.Detail)
+		return nil
+	}
+	return err
 }

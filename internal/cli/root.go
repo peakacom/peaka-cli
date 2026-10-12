@@ -42,6 +42,8 @@ type globalFlags struct {
 	noHeader      bool
 	noTruncate    bool
 	timeout       time.Duration
+	dryRun        bool
+	ifNotExists   bool
 }
 
 var gf globalFlags
@@ -181,6 +183,8 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 	pf.BoolVar(&gf.noHeader, "no-header", false, "omit the header row (table, csv, tsv)")
 	pf.BoolVar(&gf.noTruncate, "no-truncate", false, "do not shorten wide cells in tables")
 	pf.DurationVar(&gf.timeout, "timeout", 60*time.Second, "per-request timeout")
+	pf.BoolVar(&gf.dryRun, "dry-run", false, "print the request a writing command would send (method, URL, body) instead of sending it; reads still run")
+	pf.BoolVar(&gf.ifNotExists, "if-not-exists", false, "treat an already-exists conflict (409) from a create as success")
 
 	root.AddCommand(
 		newAuthCmd(), newConfigCmd(), newMeCmd(),
@@ -188,7 +192,7 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 		newConnectionsCmd(), newCatalogsCmd(), newSchemasCmd(), newTablesCmd(), newCacheCmd(),
 		newQueriesCmd(), newFoldersCmd(), newExportsCmd(), newSemanticCatalogsCmd(), newParametricTablesCmd(),
 		newMetadataCmd(), newAICmd(), newDriversCmd(), newEmbedCmd(),
-		newSQLCmd(), newAPICmd(), newVersionCmd(),
+		newSQLCmd(), newAPICmd(), newMCPCmd(), newVersionCmd(),
 	)
 	root.SetHelpCommand(newHelpCmd(root))
 	return root
@@ -339,6 +343,9 @@ func (r *Runtime) newClient(token string) *api.Client {
 	c := api.New(r.Settings.API, token, gf.timeout)
 	if gf.debug {
 		c.Debug = r.Err
+	}
+	if gf.dryRun {
+		c.DryRun = r.Out
 	}
 	return c
 }

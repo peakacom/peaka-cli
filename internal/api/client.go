@@ -24,6 +24,7 @@ type Client struct {
 	Token   string // API key or access token; sent as Bearer
 	HTTP    *http.Client
 	Debug   io.Writer // when set, request/response lines go here (secrets masked)
+	DryRun  io.Writer // when set, writing requests are printed here as JSON and not sent
 	Client  string    // "cli" or "mcp", for X-Peaka-Client
 }
 
@@ -80,6 +81,21 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 			return nil, err
 		}
 		contentType = "application/json"
+	}
+
+	if c.DryRun != nil && method != http.MethodGet && method != http.MethodHead {
+		dry := map[string]any{"dryRun": true, "method": method, "url": u}
+		if len(payload) > 0 {
+			if json.Valid(payload) {
+				dry["body"] = json.RawMessage(payload)
+			} else {
+				dry["body"] = fmt.Sprintf("<%d bytes, %s>", len(payload), contentType)
+			}
+		}
+		enc := json.NewEncoder(c.DryRun)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(dry)
+		return &Response{Status: 0, Header: http.Header{}}, nil
 	}
 
 	var last *Response
