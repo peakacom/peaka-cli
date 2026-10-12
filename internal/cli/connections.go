@@ -65,7 +65,7 @@ func newConnectionsCmd() *cobra.Command {
 		},
 	}
 	describe.Flags().BoolVar(&detail, "detail", false, "the detailed view")
-	cmd.AddCommand(describe, newConnectionsCreateCmd(), newConnectionsWaitCmd(), newConnectionTypesCmd())
+	cmd.AddCommand(describe, newConnectionsCreateCmd(), newConnectionsWaitCmd(), newConnectionsPickCmd(), newConnectionTypesCmd())
 	return cmd
 }
 

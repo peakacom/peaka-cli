@@ -22,12 +22,14 @@ func newCatalogsCmd() *cobra.Command {
 			Long: `A catalog is how a connection's data appears in SQL, as catalog.schema.table.
 
   peaka catalogs create --name hubspot --connection crm
-  peaka catalogs create --name sheets --connection sheets -f extraParameters:='{"spreadsheetId":"…"}'`,
+  peaka catalogs create --name sheets --connection sheets            # Google Sheets: picks the spreadsheets in the browser
+  peaka catalogs create --name sheets --connection sheets --sheet 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms=budget`,
 			Flags: []flagSpec{
 				{Name: "name", Help: "catalog name, as used in SQL", Required: true},
 				{Name: "connection", Help: "connection id or name", Required: true, Resolve: resolveConnection},
+				{Name: "sheet", Kind: "strings", Help: "Google Sheets: a spreadsheet to read, as its id or URL, optionally =name; repeatable (default: pick in the browser)", Set: sheetsSetter},
 			},
-			Prepare: paramsIntoBody("connection", "connectionId")},
+			Prepare: chain(paramsIntoBody("connection", "connectionId"), prepareFilePicks)},
 		opSpec{Use: "delete CATALOG", Short: "Delete a catalog", Method: http.MethodDelete, Path: "/data/projects/{project}/catalogs/{catalog}",
 			Args: []argSpec{{Name: "CATALOG", Resolve: resolveOneCatalog}}, Confirm: "Delete catalog {0} and its caches?", Empty: "Deleted."},
 		opSpec{Use: "share CATALOG", Short: "Share a catalog with another project", Method: http.MethodPost, Path: "/data/projects/{project}/catalogs/{catalog}/share",

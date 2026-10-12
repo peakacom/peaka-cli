@@ -27,6 +27,7 @@ peaka connections create --type postgres --name warehouse -c url=db.example.com 
     -c databaseName=app -c user=analyst              # asks for the password on a terminal
 peaka connections create --type hubspot --name crm   # opens the browser, finishes in the terminal
 peaka catalogs create --name hubspot --connection crm
+peaka catalogs create --name sheets --connection sheets    # Google Sheets: picks the spreadsheets in the browser (or --sheet ID|URL[=name])
 peaka schemas list hubspot
 peaka tables list hubspot.crm
 peaka tables describe hubspot.crm.deals              # columns

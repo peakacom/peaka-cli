@@ -36,7 +36,7 @@ SQL is Trino. Qualify tables fully; quote reserved words (`peaka."table".custome
 - Export a table: `peaka tables export c.s.t --limit 100000 --out ./data`.
 - Cache a slow external table: `peaka tables cached c.s.t` (is it cacheable?), then `peaka cache create --table c.s.t --full-refresh '0 3 * * *'`; `peaka cache status c.s.t`.
 - AI metadata for better text-to-SQL: `peaka metadata refresh --catalog <c> --wait`; `peaka metadata describe --catalog <c>`; `peaka metadata golden-sqls add --prompt "…" --sql "…"`.
-- Connect a source: `peaka connections types describe <type>` lists the credential fields; `peaka connections create --type <type> --name <n> -c key=value …`; OAuth types with `--no-input` print an authorization URL for a person, then `peaka connections wait <id>`; then `peaka catalogs create --name <sqlname> --connection <n>`.
+- Connect a source: `peaka connections types describe <type>` lists the credential fields; `peaka connections create --type <type> --name <n> -c key=value …`; OAuth types with `--no-input` print an authorization URL for a person, then `peaka connections wait <id>`; then `peaka catalogs create --name <sqlname> --connection <n>`. A Google Sheets catalog also needs the spreadsheets: `--sheet <id or URL>[=name]` (repeatable); a person can pick them in the browser with `peaka connections pick <n>` and pass the ids.
 - Anything else: `peaka api GET|POST <path> [-f k=v] [--input body.json]` reaches every endpoint of the REST API.
 
 ## As an MCP server
