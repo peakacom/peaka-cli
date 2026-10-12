@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/reeflective/readline/inputrc"
 	"io"
 	"os"
 	"os/exec"
@@ -40,6 +41,9 @@ type metaCommand struct {
 }
 
 var metaCommands map[string]metaCommand
+
+// keymapMenuSelect is readline's local keymap while the completion menu is open.
+const keymapMenuSelect = "menu-select"
 
 func init() {
 	metaCommands = map[string]metaCommand{
@@ -98,6 +102,13 @@ func runREPL(f *sqlFlags) error {
 	}
 	_ = rl.Config.Set("history-autosuggest", true)
 	_ = rl.Config.Set("menu-complete-display-prefix", true)
+	// Enter in the completion menu takes the candidate and nothing more; the
+	// line's own Enter (run, or continue on the next line) is the next one.
+	if rl.Config.Binds[keymapMenuSelect] == nil {
+		rl.Config.Binds[keymapMenuSelect] = map[string]inputrc.Bind{}
+	}
+	rl.Config.Binds[keymapMenuSelect][inputrc.Unescape(`\C-M`)] = inputrc.Bind{Action: "menu-complete-accept"}
+	rl.Config.Binds[keymapMenuSelect][inputrc.Unescape(`\C-J`)] = inputrc.Bind{Action: "menu-complete-accept"}
 
 	fmt.Fprintf(rt.Err, "peaka sql — %s on %s. Type \\? for help, \\q to quit.\n", r.projectName, rt.Settings.DBC)
 	for {

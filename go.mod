@@ -29,4 +29,4 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 )
 
-replace github.com/reeflective/readline => github.com/peakacom/readline v1.3.1-0.20261012212102-84a002b376d1
+replace github.com/reeflective/readline => github.com/peakacom/readline v1.3.1-0.20261012213823-068e9edc70e9
