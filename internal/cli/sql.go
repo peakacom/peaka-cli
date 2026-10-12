@@ -363,6 +363,9 @@ func (s *sqlSession) wrap(err error, statement string) error {
 		return &sqlError{q: qe, statement: statement}
 	case errors.As(err, &he):
 		p := api.ProblemFromBody(he.Status, http.Header{"Content-Type": {he.ContentType}}, he.Body)
+		if p.Status == 401 && strings.HasPrefix(rt.identity, "browser login") {
+			p.Detail += " This SQL endpoint does not accept browser logins yet; use an API key for SQL (`peaka auth login --api-key`)."
+		}
 		if _, ok := p.Params["line"]; ok {
 			return &sqlError{p: p, statement: statement}
 		}
