@@ -76,9 +76,11 @@ release:
     peaka upgrade                              # from an earlier release
     ```
 
-# The Homebrew cask (what brew uses for prebuilt binaries) goes to the tap.
-# Without HOMEBREW_TAP_TOKEN (a token that may write to peakacom/homebrew-tap)
-# the cask is only written into dist/, not pushed.
+# The Homebrew cask (what brew uses for prebuilt binaries). goreleaser only
+# writes it into dist/homebrew/Casks/peaka.rb; scripts/tap.sh adds the
+# quarantine step in Homebrew 7's `postflight_steps` form and pushes it to
+# peakacom/homebrew-tap (set HOMEBREW_TAP_TOKEN to let goreleaser push the
+# legacy form itself instead).
 homebrew_casks:
   - name: peaka
     ids: [peaka]
@@ -101,12 +103,6 @@ homebrew_casks:
       bash: completions/peaka.bash
       zsh: completions/peaka.zsh
       fish: completions/peaka.fish
-    hooks:
-      post:
-        install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/peaka"]
-          end
 
 nfpms:
   - id: packages

@@ -105,8 +105,10 @@ make release-snapshot # every platform into dist/, nothing published (needs gore
 
 Go 1.24+. Releases are cut by hand from a developer machine (no CI):
 `make release VERSION=0.2.0` tests, tags `v0.2.0`, pushes the tag and runs
-goreleaser, which builds every platform, publishes the GitHub Release and
-pushes the Homebrew cask to `peakacom/homebrew-tap`. It needs `goreleaser`
+goreleaser, which builds every platform and publishes the GitHub Release;
+`scripts/tap.sh` then pushes the Homebrew cask to `peakacom/homebrew-tap`
+(`make release TAP=` leaves the tap alone; `scripts/tap.sh --print` shows the
+cask to submit by hand). It needs `goreleaser`
 (`go install github.com/goreleaser/goreleaser/v2@latest`) and a `gh` login
 that can write to both repositories.
 
