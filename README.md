@@ -15,7 +15,43 @@ peaka api GET /connections/config --jq length
 
 Design document: see the Peaka CLI Tasarımı doc (internal). This tree holds
 phase 0 (configurations, API-key identities, `orgs`/`workspaces`/`projects`,
-`api`, output formats, exit codes) and phase 2 (`peaka sql`).
+`api`, output formats, exit codes), phase 2 (`peaka sql`) and phase 3 (the
+resource commands over the whole public API).
+
+## Resources
+
+```
+peaka connections types list --category Database     # what can be connected
+peaka connections types describe postgres            # the credential fields
+peaka connections create --type postgres --name warehouse -c url=db.example.com -c port=5432 \
+    -c databaseName=app -c user=analyst              # asks for the password on a terminal
+peaka connections create --type hubspot --name crm   # opens the browser, finishes in the terminal
+peaka catalogs create --name hubspot --connection crm
+peaka schemas list hubspot
+peaka tables list hubspot.crm
+peaka tables describe hubspot.crm.deals              # columns
+peaka tables export hubspot.crm.deals --format-out PARQUET --out ./data
+peaka cache create --table hubspot.crm.deals --full-refresh '0 3 * * *'
+peaka queries create --name won_deals --sql-file won.sql --path /sales
+peaka queries execute won_deals --format csv
+peaka folders tree --queries
+peaka metadata refresh --catalog hubspot --wait
+peaka metadata update hubspot.crm.deals --description "Open and closed deals" --use-with-ai
+peaka ai chat "How many deals closed last month?"
+peaka tables create leads && peaka tables add-column leads email --type text
+peaka tables import leads --file leads.csv
+```
+
+Every resource has `--help`. References accept ids or names (`catalog.schema.table`
+for tables, a path like `/sales` for folders). `create` and `update` take flags,
+`-f KEY=VALUE` / `-f KEY:=JSON` body fields, or `--from-file body.json`.
+Long-running work (`exports`, `metadata refresh`, OAuth connections) has `--wait`;
+with `--no-input` an OAuth `connections create` prints the authorization URL and
+`peaka connections wait ID` finishes later.
+
+Most of these commands are declared as `opSpec` entries in
+`internal/cli/resources.go`: method, path template, arguments with resolvers,
+flags with their place in the request. Hand-written verbs sit next to them.
 
 ## SQL
 

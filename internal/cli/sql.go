@@ -85,6 +85,7 @@ Without a statement on a terminal, the interactive session starts.`,
 	cmd.Flags().DurationVar(&f.queryTimeout, "query-timeout", 0, "cancel a query running longer than this (0 = no limit)")
 	cmd.Flags().BoolVar(&f.completeAt, "complete", false, "print the completions offered at the end of the text (development aid)")
 	_ = cmd.Flags().MarkHidden("complete")
+	cmd.AddCommand(newSQLTranspileCmd())
 	return cmd
 }
 

@@ -1,8 +1,16 @@
 # peaka — guide for agents
 
 `peaka` is Peaka's CLI. Grammar: `peaka <resource> <verb> [args] [flags]`.
-Verbs: `list`, `describe`, `create`, `update`, `delete`, `use`. Resources: `orgs`, `workspaces`, `projects`
-(more arrive with each release; `peaka help --format json` lists the full tree with every flag).
+Verbs: `list`, `describe`, `create`, `update`, `delete`, `use`, plus resource-specific ones.
+Resources: `orgs`, `workspaces`, `projects`, `api-keys`, `connections` (+ `types`), `catalogs`, `schemas`,
+`tables`, `cache`, `queries`, `folders`, `exports`, `semantic-catalogs`, `parametric-tables`, `metadata`
+(+ `relations`, `golden-sqls`, `categorical`, `callback`), `ai`, `drivers`, `embed`, `sql`, `api`.
+`peaka help --format json` lists the full tree with every flag; `peaka <resource> --help` the verbs.
+References: tables are `catalog.schema.table`; catalogs, connections, queries and folders accept an id or a name
+(folders also a path like `/analytics`); an ambiguous name is exit 6 listing the ids.
+Writes: `create`/`update` take flags, `-f KEY=VALUE` / `-f KEY:=JSON` body fields, or `--from-file body.json`.
+Long jobs: `exports` and `metadata refresh` have `--wait`; `connections create` for an OAuth type with `--no-input`
+prints `{"id","url","status":"PENDING_AUTHORIZATION"}` — a person opens `url`, then `peaka connections wait ID`.
 SQL: `peaka sql "STATEMENT"` runs Trino SQL on the project in context; `--format jsonl` streams rows,
 `--max-rows N` caps them, `--query-timeout 30s` bounds the run. Qualify tables as `catalog.schema.table`
 (quote reserved words: `peaka."table".customers`). `SHOW CATALOGS`, `SHOW SCHEMAS FROM c`,
@@ -24,5 +32,10 @@ SQL: `peaka sql "STATEMENT"` runs Trino SQL on the project in context; `--format
 peaka me --format json
 peaka orgs list --format json
 peaka projects list --org <orgId> --format json
-peaka api GET /data/projects/<projectId>/catalogs
+peaka catalogs list --project <projectId>
+peaka tables list stripe.payment --project <projectId>
+peaka tables describe stripe.payment.charges --project <projectId>
+peaka sql "SELECT count(*) FROM stripe.payment.charges" --project <projectId>
+peaka queries create --name charges_by_day --sql-file q.sql --project <projectId>
+peaka queries export charges_by_day --format-out PARQUET --out ./data --project <projectId>
 ```

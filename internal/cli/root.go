@@ -57,7 +57,9 @@ type Runtime struct {
 	StdoutTTY bool
 	StdinTTY  bool
 
-	client *api.Client
+	client    *api.Client
+	catalogs  []record // catalogs of the project in context, once listed
+	connTypes []record // /connections/config, once listed
 }
 
 var rt *Runtime
@@ -94,7 +96,12 @@ func reportError(err error) int {
 		}
 		return se.exitCode()
 	case errors.As(err, &xe):
-		fmt.Fprintf(stderr, "ERROR  %s\n", xe.Err)
+		// the CLI's own refusals follow the same contract as the API's: problem+json when piped
+		if rt != nil && !rt.StdoutTTY || (rt != nil && rt.Settings != nil && rt.Settings.Format == "json") {
+			(&api.Problem{Code: codeForExit(xe.Code), Detail: xe.Err.Error(), Retryable: xe.Code == api.ExitRetryable}).WriteJSON(stderr)
+		} else {
+			fmt.Fprintf(stderr, "ERROR  %s\n", xe.Err)
+		}
 		return xe.Code
 	case errors.Is(err, context.Canceled):
 		return api.ExitInterrupted
@@ -102,6 +109,31 @@ func reportError(err error) int {
 	// cobra's own errors (unknown flag, missing arg) are usage errors.
 	fmt.Fprintf(stderr, "ERROR  %s\n", err)
 	return api.ExitUsage
+}
+
+// codeForExit names the CLI's own refusals the way the API names its problems.
+func codeForExit(code int) string {
+	switch code {
+	case api.ExitUsage:
+		return "USAGE"
+	case api.ExitAuth:
+		return "AUTHENTICATION_REQUIRED"
+	case api.ExitNotFound:
+		return "NOT_FOUND"
+	case api.ExitPermission:
+		return "PERMISSION_REQUIRED"
+	case api.ExitInvalid:
+		return "VALIDATION_FAILED"
+	case api.ExitConflict:
+		return "CONFLICT"
+	case api.ExitFailed:
+		return "FAILED"
+	case api.ExitRetryable:
+		return "RETRYABLE"
+	case api.ExitInterrupted:
+		return "INTERRUPTED"
+	}
+	return "ERROR"
 }
 
 func newRoot() *cobra.Command {
@@ -142,7 +174,10 @@ Help:     peaka help --agent   (the short guide for AI agents)`,
 
 	root.AddCommand(
 		newAuthCmd(), newConfigCmd(), newMeCmd(),
-		newOrgsCmd(), newWorkspacesCmd(), newProjectsCmd(),
+		newOrgsCmd(), newWorkspacesCmd(), newProjectsCmd(), newAPIKeysCmd(),
+		newConnectionsCmd(), newCatalogsCmd(), newSchemasCmd(), newTablesCmd(), newCacheCmd(),
+		newQueriesCmd(), newFoldersCmd(), newExportsCmd(), newSemanticCatalogsCmd(), newParametricTablesCmd(),
+		newMetadataCmd(), newAICmd(), newDriversCmd(), newEmbedCmd(),
 		newSQLCmd(), newAPICmd(), newVersionCmd(),
 	)
 	root.SetHelpCommand(newHelpCmd(root))

@@ -27,6 +27,12 @@ type Client struct {
 	Client  string    // "cli" or "mcp", for X-Peaka-Client
 }
 
+// RawBody is a request body sent as is, with its own content type (multipart uploads).
+type RawBody struct {
+	ContentType string
+	Data        []byte
+}
+
 type Response struct {
 	Status int
 	Header http.Header
@@ -58,6 +64,8 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	contentType := ""
 	switch b := body.(type) {
 	case nil:
+	case *RawBody:
+		payload, contentType = b.Data, b.ContentType
 	case []byte:
 		payload, contentType = b, "application/json"
 	case io.Reader:
