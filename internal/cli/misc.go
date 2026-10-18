@@ -50,37 +50,53 @@ func mergeCurrent(pathTemplate string, keys ...string) func(*callCtx) error {
 	}
 }
 
-// mergeTableMetadata fills the fields `metadata update` did not set from the
-// table's current metadata: the endpoint wants the whole record (columns included).
+// mergeTableMetadata prepares a versioned edit through the exact, authorized management read.
+// Never downgrade to an unversioned save when that endpoint is unavailable.
 func mergeTableMetadata(c *callCtx) error {
-	project, _ := rt.needProject()
-	q := url.Values{"catalogId": {c.Params["catalog"]}, "schemaName": {c.Params["schema"]}}
-	entries, err := rt.listRecords(fmt.Sprintf("/metadata/%s", project), q, "metadata")
+	project, err := rt.needProject()
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		m, _ := e["metadata"].(map[string]any)
-		if m == nil || !strings.EqualFold(str(m["tableName"]), c.Params["table"]) {
-			continue
-		}
-		if _, set := c.Body["columns"]; !set {
-			c.Body["columns"] = m["columns"]
-		}
-		if _, set := c.Body["tableDescription"]; !set {
-			c.Body["tableDescription"] = firstNonEmpty(str(m["tableDescription"]), str(m["description"]))
-		}
-		if _, set := c.Body["useWithAI"]; !set {
-			if v, ok := m["useWithAI"]; ok {
-				c.Body["useWithAI"] = v
-			}
-		}
-		return nil
+	client, err := rt.api()
+	if err != nil {
+		return err
 	}
-	return api.Exit(api.ExitNotFound, "no metadata for %s.%s.%s; run `peaka metadata refresh --catalog %s` first", c.Params["catalogName"], c.Params["schema"], c.Params["table"], c.Params["catalogName"])
+	path := fmt.Sprintf("/metadata/%s/tables/%s/%s/%s", url.PathEscape(project), url.PathEscape(c.Params["catalog"]), url.PathEscape(c.Params["schema"]), url.PathEscape(c.Params["table"]))
+	var current struct {
+		Metadata map[string]any `json:"metadata"`
+	}
+	if err := client.Get(rt.Ctx, path, nil, &current); err != nil {
+		return err
+	}
+	return prepareMetadataEdit(c.Body, current.Metadata)
 }
 
-// --- catalogs search ---------------------------------------------------------
+func prepareMetadataEdit(body, current map[string]any) error {
+	if current == nil || current["version"] == nil {
+		return api.Exit(api.ExitFailed, "metadata has no editable version; refresh metadata before editing")
+	}
+	if version, present := body["version"]; present && version == nil {
+		return api.Exit(api.ExitFailed, "version cannot be null")
+	}
+	if _, supplied := body["version"]; !supplied {
+		body["version"] = current["version"]
+	}
+	// No column edits means no column updates; copying source projections can overwrite unrelated fields.
+	if _, supplied := body["columns"]; !supplied {
+		body["columns"] = []any{}
+	}
+	if _, supplied := body["useWithAI"]; !supplied {
+		if _, explicit := body["useWithAISetting"]; !explicit {
+			if setting := current["useWithAISetting"]; setting != nil {
+				body["useWithAISetting"] = setting
+			}
+		}
+		if value, exists := current["useWithAI"]; exists {
+			body["useWithAI"] = value
+		}
+	}
+	return nil
+}
 
 func newSearchCmd() *cobra.Command {
 	var catalog, schema string
