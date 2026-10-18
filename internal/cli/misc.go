@@ -305,6 +305,9 @@ func newMetadataRefreshCmd() *cobra.Command {
 		Short: "Refresh source metadata of the project or a catalog; does not rebuild embeddings",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if wait && timeout <= 0 {
+				return api.Exit(api.ExitUsage, "--wait-timeout must be positive")
+			}
 			project, err := rt.needProject()
 			if err != nil {
 				return err
@@ -331,55 +334,21 @@ func newMetadataRefreshCmd() *cobra.Command {
 			if _, err := client.Do(rt.Ctx, http.MethodPost, fmt.Sprintf("/metadata/%s/refresh", project), nil, body, &started); err != nil {
 				return err
 			}
-			if !wait || p["catalog"] == "" {
-				if wait {
-					rt.note("--wait needs --catalog (the status endpoint is per catalog)")
-				}
+			if !wait || gf.dryRun {
 				if started == nil {
-					rt.note("Refresh started.")
 					return nil
 				}
 				return rt.print(started)
 			}
-			deadline := time.Now().Add(timeout)
-			last := ""
-			for {
-				var st record
-				if err := client.Get(rt.Ctx, fmt.Sprintf("/metadata/%s/refresh/%s", project, p["catalog"]), nil, &st); err != nil {
-					return err
-				}
-				status := str(st["status"])
-				line := status
-				if pr, ok := st["progress"].(map[string]any); ok {
-					line = fmt.Sprintf("%s %v%% %s", status, pr["percent"], str(pr["message"]))
-				}
-				if line != last && rt.StdoutTTY {
-					rt.note("metadata refresh %s: %s", p["catalogName"], line)
-					last = line
-				}
-				switch status {
-				case "completed":
-					return rt.print(st)
-				case "failed":
-					_ = rt.print(st)
-					return api.Exit(api.ExitFailed, "metadata refresh failed: %s", str(st["failedReason"]))
-				}
-				if time.Now().After(deadline) {
-					return api.Exit(api.ExitRetryable, "metadata refresh still %s after %s", status, timeout)
-				}
-				select {
-				case <-time.After(2 * time.Second):
-				case <-rt.Ctx.Done():
-					return api.Exit(api.ExitInterrupted, "interrupted")
-				}
-			}
+			return waitMetadataOperations(client, project, started, timeout)
+
 		},
 	}
 	cmd.Flags().StringVar(&catalog, "catalog", "", "catalog id or name (default: the whole project)")
 	_ = cmd.RegisterFlagCompletionFunc("catalog", flagCompleter(completeDotted(1)))
 	cmd.Flags().StringVar(&callbackURL, "callback-url", "", "URL to call when the job finishes")
 	cmd.Flags().StringVar(&callbackToken, "callback-token", "", "bearer token for the callback")
-	cmd.Flags().BoolVar(&wait, "wait", false, "follow the job until it finishes (needs --catalog)")
+	cmd.Flags().BoolVar(&wait, "wait", false, "follow the exact accepted operations until they finish")
 	cmd.Flags().DurationVar(&timeout, "wait-timeout", 30*time.Minute, "how long to wait")
 	return cmd
 }
