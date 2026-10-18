@@ -246,3 +246,11 @@ peaka skill install                                  # Claude Code, for you: ~/.
 peaka skill install --agent claude,codex,cursor --project-dir .   # in this repository, for the team
 peaka skill show                                     # print it
 ```
+
+### Bounded metadata management
+
+`peaka metadata list --project PROJECT --catalog CATALOG --limit 20` returns one page, including AI-excluded tables the caller can manage. Continue with `--cursor NEXT_CURSOR` and unchanged scope/limit. The envelope retains `items`, `nextCursor`, `hasMore`, `completeness`, and `snapshot`; an empty page can have a continuation. Maximum page size50; cursors expire after15minutes. This lists collected metadata, not a complete source inventory. Existing `metadata describe` is unchanged.
+
+`peaka metadata ai-usage CATALOG --setting inherit` restores inherited AI preference; `on` and `off` are also accepted. The legacy `--use-with-ai` flag remains supported. AI preference does not grant or remove data access.
+
+These commands require the DEV-4102 gateway/search capabilities. Unsupported endpoints and permission failures are explicit errors, without automatic full-project fallback. `metadata refresh --wait` follows the submitted run IDs, never the latest catalog job; only complete success exits successfully. Deploy the backend/gateway before releasing this CLI. Rolling the server back leaves legacy reads available; do not downgrade safe edits into blind writes.
