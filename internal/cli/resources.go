@@ -333,7 +333,7 @@ func newMetadataCmd() *cobra.Command {
 			Args: []argSpec{{Name: "TABLE", Resolve: resolveTable}},
 			Flags: []flagSpec{
 				{Name: "description", Key: "tableDescription", Help: "table description"},
-				{Name: "use-with-ai", Kind: "bool", Key: "useWithAI", Help: "expose the table to the AI agent"},
+				{Name: "use-with-ai", Kind: "bool", Key: "useWithAI", Help: "include the table in automatic AI context (does not change access permissions)"},
 			},
 			Prepare: mergeTableMetadata},
 		opSpec{Use: "ai-usage CATALOG[.SCHEMA]", Short: "Turn AI usage on or off for a whole catalog or schema", Method: http.MethodPut, Path: "/metadata/{project}/{catalog}",

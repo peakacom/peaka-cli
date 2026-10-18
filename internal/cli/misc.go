@@ -302,7 +302,7 @@ func newMetadataRefreshCmd() *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "refresh",
-		Short: "Rebuild the AI metadata of the project, or of one catalog; --wait follows the job",
+		Short: "Refresh source metadata of the project or a catalog; does not rebuild embeddings",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
