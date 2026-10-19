@@ -85,11 +85,17 @@ func prepareMetadataEdit(body, current map[string]any) error {
 	if _, supplied := body["columns"]; !supplied {
 		body["columns"] = []any{}
 	}
+	// An explicit setting (DEV-4133: --ai-setting) is the whole answer: the current boolean is not copied next to it,
+	// or "on" for a table that inherits off would arrive with useWithAI=false and be refused as a conflict.
+	if setting, explicit := body["useWithAISetting"]; explicit {
+		if s, ok := setting.(string); !ok || (s != "inherit" && s != "on" && s != "off") {
+			return api.Exit(api.ExitUsage, "--ai-setting must be inherit, on or off")
+		}
+		return nil
+	}
 	if _, supplied := body["useWithAI"]; !supplied {
-		if _, explicit := body["useWithAISetting"]; !explicit {
-			if setting := current["useWithAISetting"]; setting != nil {
-				body["useWithAISetting"] = setting
-			}
+		if setting := current["useWithAISetting"]; setting != nil {
+			body["useWithAISetting"] = setting
 		}
 		if value, exists := current["useWithAI"]; exists {
 			body["useWithAI"] = value
@@ -349,7 +355,7 @@ func newMetadataRefreshCmd() *cobra.Command {
 	cmd.Flags().StringVar(&callbackURL, "callback-url", "", "URL to call when the job finishes")
 	cmd.Flags().StringVar(&callbackToken, "callback-token", "", "bearer token for the callback")
 	cmd.Flags().BoolVar(&wait, "wait", false, "follow the exact accepted operations until they finish")
-	cmd.Flags().DurationVar(&timeout, "wait-timeout", 30*time.Minute, "how long to wait")
+	cmd.Flags().DurationVar(&timeout, "wait-timeout", 30*time.Minute, "how long to wait; when it runs out the run IDs are printed and the exit code is 9 (the refresh goes on)")
 	return cmd
 }
 

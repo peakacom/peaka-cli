@@ -79,3 +79,20 @@ func TestMetadataEditUsesExactReadAndDoesNotFallback(t *testing.T) {
 		})
 	}
 }
+
+// DEV-4133: a table inheriting "on" can be pinned to its own "on"; the setting is sent alone.
+func TestMetadataAiSettingPinsTheTableOwnSetting(t *testing.T) {
+	body := map[string]any{"useWithAISetting": "on"}
+	if err := prepareMetadataEdit(body, map[string]any{"version": float64(4), "useWithAI": true, "useWithAISetting": "inherit"}); err != nil {
+		t.Fatal(err)
+	}
+	if body["useWithAISetting"] != "on" || body["version"] != float64(4) {
+		t.Fatal(body)
+	}
+	if _, copied := body["useWithAI"]; copied {
+		t.Fatal("the current boolean was copied next to an explicit setting")
+	}
+	if err := prepareMetadataEdit(map[string]any{"useWithAISetting": "yes"}, map[string]any{"version": float64(4)}); err == nil {
+		t.Fatal("an unknown setting was accepted")
+	}
+}

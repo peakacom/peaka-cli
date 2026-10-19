@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/peakacom/peaka-cli/internal/api"
 	"net/url"
@@ -45,6 +46,18 @@ func refreshRunState(status string) (bool, error) {
 	}
 }
 
+// Polling of refresh operations (DEV-4133): starts at 2 s and backs off to 15 s; up to five transient failures in a row
+// (no connection, 5xx, 429) are waited out. Variables so tests can shorten them.
+var (
+	refreshPollInitial    = 2 * time.Second
+	refreshPollMax        = 15 * time.Second
+	refreshTransientLimit = 5
+)
+
+// waitMetadataOperations follows the submitted refresh operations to the end. Whatever ends the wait, the run IDs
+// and their last known state are printed first, so they can be followed later (DEV-4133). Exit codes: 0 all done;
+// 8 an operation ended other than done; 9 the wait timed out or the API stayed unreachable (the operations go on);
+// 130 interrupted.
 func waitMetadataOperations(client *api.Client, project string, started any, timeout time.Duration) error {
 	ids, err := refreshRunIDs(started)
 	if err != nil {
@@ -54,6 +67,18 @@ func waitMetadataOperations(client *api.Client, project string, started any, tim
 	defer cancel()
 	finished := map[string]bool{}
 	latest := map[string]record{}
+	report := func(result error) error {
+		_ = rt.print(map[string]any{"runIds": ids, "operations": latest})
+		return result
+	}
+	stopped := func() error {
+		if rt.Ctx.Err() != nil {
+			return report(api.Exit(api.ExitInterrupted, "interrupted; the refresh operations go on"))
+		}
+		return report(api.Exit(api.ExitRetryable, "stopped waiting after %s; the refresh operations go on", timeout))
+	}
+	interval := refreshPollInitial
+	transient := 0
 	for len(finished) < len(ids) {
 		for _, id := range ids {
 			if finished[id] {
@@ -62,16 +87,27 @@ func waitMetadataOperations(client *api.Client, project string, started any, tim
 			var row record
 			err := client.Get(ctx, fmt.Sprintf("/metadata/%s/operations/%s", url.PathEscape(project), url.PathEscape(id)), nil, &row)
 			if err != nil {
-				return err
+				if ctx.Err() != nil {
+					return stopped()
+				}
+				var problem *api.Problem
+				if errors.As(err, &problem) && (problem.Retryable || problem.Status == 0 || problem.Status == 429 || problem.Status >= 500) {
+					transient++
+					if transient >= refreshTransientLimit {
+						return report(api.Exit(api.ExitRetryable, "the API did not answer %d times in a row; the refresh operations go on: %s", transient, err))
+					}
+					continue
+				}
+				return report(err)
 			}
+			transient = 0
 			if str(row["id"]) != id || str(row["projectId"]) != project || str(row["kind"]) != "refresh" {
-				return api.Exit(api.ExitFailed, "operation identity does not match the submitted refresh")
+				return report(api.Exit(api.ExitFailed, "operation identity does not match the submitted refresh"))
 			}
 			latest[id] = row
 			done, stateErr := refreshRunState(str(row["status"]))
 			if stateErr != nil {
-				_ = rt.print(map[string]any{"runIds": ids, "operations": latest})
-				return stateErr
+				return report(stateErr)
 			}
 			if done {
 				finished[id] = true
@@ -81,9 +117,12 @@ func waitMetadataOperations(client *api.Client, project string, started any, tim
 			break
 		}
 		select {
-		case <-time.After(2 * time.Second):
+		case <-time.After(interval):
 		case <-ctx.Done():
-			return api.Exit(api.ExitRetryable, "stopped waiting for refresh operations: %s", ctx.Err())
+			return stopped()
+		}
+		if interval = interval * 3 / 2; interval > refreshPollMax {
+			interval = refreshPollMax
 		}
 	}
 	return rt.print(map[string]any{"runIds": ids, "operations": latest})

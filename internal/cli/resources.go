@@ -336,11 +336,13 @@ func newMetadataCmd() *cobra.Command {
 			Args: []argSpec{{Name: "CATALOG", Resolve: resolveOneCatalog}}},
 		opSpec{Use: "update TABLE", Short: "Set a table's description, columns and AI usage (catalog.schema.table)", Method: http.MethodPut, Path: "/metadata/{project}/{catalog}/{schema}/{table}", Body: true,
 			Long: `  peaka metadata update hubspot.crm.deals --description "Closed and open deals" --use-with-ai
+  peaka metadata update hubspot.crm.deals --ai-setting on   # keep it on even if the schema is turned off
   peaka metadata update hubspot.crm.deals --from-file deals-metadata.json   # tableDescription, columns[], useWithAI`,
 			Args: []argSpec{{Name: "TABLE", Resolve: resolveTable}},
 			Flags: []flagSpec{
 				{Name: "description", Key: "tableDescription", Help: "table description"},
 				{Name: "use-with-ai", Kind: "bool", Key: "useWithAI", Help: "include the table in automatic AI context (does not change access permissions)"},
+				{Name: "ai-setting", Key: "useWithAISetting", Help: "the table's own AI usage: inherit, on or off (on pins a table that inherits on)"},
 			},
 			Prepare: mergeTableMetadata},
 		opSpec{Use: "ai-usage CATALOG[.SCHEMA]", Short: "Set inherited or explicit AI usage for a catalog or schema", Method: http.MethodPut, Path: "/metadata/{project}/{catalog}",
