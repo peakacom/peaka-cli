@@ -50,37 +50,59 @@ func mergeCurrent(pathTemplate string, keys ...string) func(*callCtx) error {
 	}
 }
 
-// mergeTableMetadata fills the fields `metadata update` did not set from the
-// table's current metadata: the endpoint wants the whole record (columns included).
+// mergeTableMetadata prepares a versioned edit through the exact, authorized management read.
+// Never downgrade to an unversioned save when that endpoint is unavailable.
 func mergeTableMetadata(c *callCtx) error {
-	project, _ := rt.needProject()
-	q := url.Values{"catalogId": {c.Params["catalog"]}, "schemaName": {c.Params["schema"]}}
-	entries, err := rt.listRecords(fmt.Sprintf("/metadata/%s", project), q, "metadata")
+	project, err := rt.needProject()
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		m, _ := e["metadata"].(map[string]any)
-		if m == nil || !strings.EqualFold(str(m["tableName"]), c.Params["table"]) {
-			continue
-		}
-		if _, set := c.Body["columns"]; !set {
-			c.Body["columns"] = m["columns"]
-		}
-		if _, set := c.Body["tableDescription"]; !set {
-			c.Body["tableDescription"] = firstNonEmpty(str(m["tableDescription"]), str(m["description"]))
-		}
-		if _, set := c.Body["useWithAI"]; !set {
-			if v, ok := m["useWithAI"]; ok {
-				c.Body["useWithAI"] = v
-			}
+	client, err := rt.api()
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/metadata/%s/tables/%s/%s/%s", url.PathEscape(project), url.PathEscape(c.Params["catalog"]), url.PathEscape(c.Params["schema"]), url.PathEscape(c.Params["table"]))
+	var current struct {
+		Metadata map[string]any `json:"metadata"`
+	}
+	if err := client.Get(rt.Ctx, path, nil, &current); err != nil {
+		return err
+	}
+	return prepareMetadataEdit(c.Body, current.Metadata)
+}
+
+func prepareMetadataEdit(body, current map[string]any) error {
+	if current == nil || current["version"] == nil {
+		return api.Exit(api.ExitFailed, "metadata has no editable version; refresh metadata before editing")
+	}
+	if version, present := body["version"]; present && version == nil {
+		return api.Exit(api.ExitFailed, "version cannot be null")
+	}
+	if _, supplied := body["version"]; !supplied {
+		body["version"] = current["version"]
+	}
+	// No column edits means no column updates; copying source projections can overwrite unrelated fields.
+	if _, supplied := body["columns"]; !supplied {
+		body["columns"] = []any{}
+	}
+	// An explicit setting (DEV-4133: --ai-setting) is the whole answer: the current boolean is not copied next to it,
+	// or "on" for a table that inherits off would arrive with useWithAI=false and be refused as a conflict.
+	if setting, explicit := body["useWithAISetting"]; explicit {
+		if s, ok := setting.(string); !ok || (s != "inherit" && s != "on" && s != "off") {
+			return api.Exit(api.ExitUsage, "--ai-setting must be inherit, on or off")
 		}
 		return nil
 	}
-	return api.Exit(api.ExitNotFound, "no metadata for %s.%s.%s; run `peaka metadata refresh --catalog %s` first", c.Params["catalogName"], c.Params["schema"], c.Params["table"], c.Params["catalogName"])
+	if _, supplied := body["useWithAI"]; !supplied {
+		if setting := current["useWithAISetting"]; setting != nil {
+			body["useWithAISetting"] = setting
+		}
+		if value, exists := current["useWithAI"]; exists {
+			body["useWithAI"] = value
+		}
+	}
+	return nil
 }
-
-// --- catalogs search ---------------------------------------------------------
 
 func newSearchCmd() *cobra.Command {
 	var catalog, schema string
@@ -286,9 +308,12 @@ func newMetadataRefreshCmd() *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{
 		Use:   "refresh",
-		Short: "Rebuild the AI metadata of the project, or of one catalog; --wait follows the job",
+		Short: "Refresh source metadata of the project or a catalog; does not rebuild embeddings",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if wait && timeout <= 0 {
+				return api.Exit(api.ExitUsage, "--wait-timeout must be positive")
+			}
 			project, err := rt.needProject()
 			if err != nil {
 				return err
@@ -315,56 +340,22 @@ func newMetadataRefreshCmd() *cobra.Command {
 			if _, err := client.Do(rt.Ctx, http.MethodPost, fmt.Sprintf("/metadata/%s/refresh", project), nil, body, &started); err != nil {
 				return err
 			}
-			if !wait || p["catalog"] == "" {
-				if wait {
-					rt.note("--wait needs --catalog (the status endpoint is per catalog)")
-				}
+			if !wait || gf.dryRun {
 				if started == nil {
-					rt.note("Refresh started.")
 					return nil
 				}
 				return rt.print(started)
 			}
-			deadline := time.Now().Add(timeout)
-			last := ""
-			for {
-				var st record
-				if err := client.Get(rt.Ctx, fmt.Sprintf("/metadata/%s/refresh/%s", project, p["catalog"]), nil, &st); err != nil {
-					return err
-				}
-				status := str(st["status"])
-				line := status
-				if pr, ok := st["progress"].(map[string]any); ok {
-					line = fmt.Sprintf("%s %v%% %s", status, pr["percent"], str(pr["message"]))
-				}
-				if line != last && rt.StdoutTTY {
-					rt.note("metadata refresh %s: %s", p["catalogName"], line)
-					last = line
-				}
-				switch status {
-				case "completed":
-					return rt.print(st)
-				case "failed":
-					_ = rt.print(st)
-					return api.Exit(api.ExitFailed, "metadata refresh failed: %s", str(st["failedReason"]))
-				}
-				if time.Now().After(deadline) {
-					return api.Exit(api.ExitRetryable, "metadata refresh still %s after %s", status, timeout)
-				}
-				select {
-				case <-time.After(2 * time.Second):
-				case <-rt.Ctx.Done():
-					return api.Exit(api.ExitInterrupted, "interrupted")
-				}
-			}
+			return waitMetadataOperations(client, project, started, timeout)
+
 		},
 	}
 	cmd.Flags().StringVar(&catalog, "catalog", "", "catalog id or name (default: the whole project)")
 	_ = cmd.RegisterFlagCompletionFunc("catalog", flagCompleter(completeDotted(1)))
 	cmd.Flags().StringVar(&callbackURL, "callback-url", "", "URL to call when the job finishes")
 	cmd.Flags().StringVar(&callbackToken, "callback-token", "", "bearer token for the callback")
-	cmd.Flags().BoolVar(&wait, "wait", false, "follow the job until it finishes (needs --catalog)")
-	cmd.Flags().DurationVar(&timeout, "wait-timeout", 30*time.Minute, "how long to wait")
+	cmd.Flags().BoolVar(&wait, "wait", false, "follow the exact accepted operations until they finish")
+	cmd.Flags().DurationVar(&timeout, "wait-timeout", 30*time.Minute, "how long to wait; when it runs out the run IDs are printed and the exit code is 9 (the refresh goes on)")
 	return cmd
 }
 
