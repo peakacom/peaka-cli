@@ -142,6 +142,7 @@ func (q *Query) Next(ctx context.Context) (rows [][]any, done bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
+	plainNumbers(rows, q.Columns)
 	if q.nextURI == "" {
 		q.done = true
 	}
@@ -220,7 +221,9 @@ func (c *Client) setHeaders(req *http.Request) {
 	if c.Source != "" {
 		req.Header.Set("X-Trino-Source", c.Source)
 	}
-	req.Header.Set("X-Trino-Client-Capabilities", "PARAMETRIC_DATETIME")
+	// NUMBER: without it Trino sends its number type as a varchar, and plainNumbers could not tell which
+	// columns to rewrite.
+	req.Header.Set("X-Trino-Client-Capabilities", "PARAMETRIC_DATETIME,NUMBER")
 	if len(c.Extra) > 0 {
 		parts := make([]string, 0, len(c.Extra))
 		for k, v := range c.Extra {
