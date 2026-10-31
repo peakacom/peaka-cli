@@ -285,3 +285,24 @@ func TestExportsCancelSendsNothingForAFinishedExport(t *testing.T) {
 		t.Fatalf("a running export was not cancelled: %v", *seen)
 	}
 }
+
+func TestExportLeavesSystemColumnsOutUnlessAsked(t *testing.T) {
+	server, seen := fakeGateway(t, map[string]string{
+		"POST /data/projects/p/catalogs/111/schemas/payment/tables/charges/exports": `{"id":"e1","status":"PENDING"}`,
+	})
+	for _, c := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"export", "stripe.payment.charges"}, false},
+		{[]string{"export", "stripe.payment.charges", "--system-columns"}, true},
+	} {
+		*seen = nil
+		if _, _, err := runCmd(t, server, "json", newTablesCmd(), c.args...); err != nil {
+			t.Fatal(c.args, err)
+		}
+		if got, ok := (*seen)[0].Body["includeSystemColumns"]; !ok || got != c.want {
+			t.Fatalf("%v: includeSystemColumns %v (sent %v), want %v", c.args, got, ok, c.want)
+		}
+	}
+}

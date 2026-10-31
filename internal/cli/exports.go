@@ -53,9 +53,8 @@ func (f *exportFlags) body() map[string]any {
 	if len(f.columns) > 0 {
 		b["columns"] = f.columns
 	}
-	if f.systemColumns {
-		b["includeSystemColumns"] = true
-	}
+	// Always sent: the API includes system columns unless told not to, and --system-columns says they are opt-in.
+	b["includeSystemColumns"] = f.systemColumns
 	csv := map[string]any{}
 	if f.csvDelimiter != "" {
 		csv["delimiter"] = f.csvDelimiter
@@ -76,8 +75,12 @@ func (r *Runtime) startExport(path string, f *exportFlags) error {
 		return err
 	}
 	var job record
-	if _, err := client.Do(r.Ctx, http.MethodPost, path, nil, f.body(), &job); err != nil {
+	resp, err := client.Do(r.Ctx, http.MethodPost, path, nil, f.body(), &job)
+	if err != nil {
 		return err
+	}
+	if resp.Status == 0 { // --dry-run printed the request
+		return nil
 	}
 	if !f.wait && f.out == "" {
 		r.note("Export %s %s. `peaka exports describe %s` shows its progress; `peaka exports download %s` fetches the files.", str(job["id"]), str(job["status"]), str(job["id"]), str(job["id"]))
