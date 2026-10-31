@@ -4,13 +4,16 @@
 Verbs: `list`, `describe`, `create`, `update`, `delete`, `use`, plus resource-specific ones.
 Resources: `orgs`, `workspaces`, `projects`, `api-keys`, `connections` (+ `types`), `catalogs`, `schemas`,
 `tables`, `cache`, `queries`, `folders`, `exports`, `semantic-catalogs`, `parametric-tables`, `metadata`
-(+ `relations`, `golden-sqls`, `categorical`, `callback`), `ai`, `drivers`, `embed`, `sql`, `api`.
+(+ `table-list`, `relevant-tables`, `descriptions`, `relations`, `golden-sqls`, `categorical`, `callback`), `ai`, `drivers`, `embed`, `sql`, `api`.
 `peaka help --format json` lists the full tree with every flag; `peaka <resource> --help` the verbs.
 References: tables are `catalog.schema.table`; catalogs, connections, queries and folders accept an id or a name
 (folders also a path like `/analytics`); an ambiguous name is exit 6 listing the ids.
 Writes: `create`/`update` take flags, `-f KEY=VALUE` / `-f KEY:=JSON` body fields, or `--from-file body.json`.
 Long jobs: `exports` and `metadata refresh` have `--wait`; `connections create` for an OAuth type with `--no-input`
 prints `{"id","url","status":"PENDING_AUTHORIZATION"}` — a person opens `url`, then `peaka connections wait ID`.
+Data question: `peaka metadata table-list` (every table on one line), then
+`peaka metadata describe --format-out compact --table c.s.t --table …` for the chosen tables only, then SQL;
+when the list is `too_large`, `peaka metadata relevant-tables "QUESTION"`.
 SQL: `peaka sql "STATEMENT"` runs Trino SQL on the project in context; `--format jsonl` streams rows,
 `--max-rows N` caps them, `--query-timeout 30s` bounds the run. Qualify tables as `catalog.schema.table`
 (quote reserved words: `peaka."table".customers`). `SHOW CATALOGS`, `SHOW SCHEMAS FROM c`,
@@ -26,7 +29,7 @@ SQL: `peaka sql "STATEMENT"` runs Trino SQL on the project in context; `--format
 6. Context: `PEAKA_PROJECT=<id>` and `PEAKA_ORG=<id>` (or `--project`, `--org`). Run `peaka me` first: it prints the identity and the context.
 7. `--dry-run` prints the request a writing command would send instead of sending it; `--if-not-exists` makes a create succeed when the thing exists; `--debug` prints the HTTP exchange to stderr.
 8. `peaka api METHOD PATH [-f k=v] [--input body.json]` reaches any REST endpoint; see `peaka api --help`.
-9. `peaka mcp serve --project <id>` serves these commands as MCP tools over stdio (`peaka_sql`, `peaka_list_tables`, `peaka_run`, …) with the resources `peaka://guide` and `peaka://sql-rules`.
+9. `peaka mcp serve --project <id>` serves these commands as MCP tools over stdio (`peaka_table_list`, `peaka_get_project_metadata`, `peaka_sql`, `peaka_run`, …) with the resources `peaka://guide` and `peaka://sql-rules`.
 
 ## Typical session
 ```
@@ -34,8 +37,8 @@ peaka me --format json
 peaka orgs list --format json
 peaka projects list --org <orgId> --format json
 peaka catalogs list --project <projectId>
-peaka tables list stripe.payment --project <projectId>
-peaka tables describe stripe.payment.charges --project <projectId>
+peaka metadata table-list --project <projectId>
+peaka metadata describe --format-out compact --table stripe.payment.charges --project <projectId>
 peaka sql "SELECT count(*) FROM stripe.payment.charges" --project <projectId>
 peaka queries create --name charges_by_day --sql-file q.sql --project <projectId>
 peaka queries export charges_by_day --format-out PARQUET --out ./data --project <projectId>
