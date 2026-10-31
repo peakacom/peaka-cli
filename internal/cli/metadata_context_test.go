@@ -263,3 +263,25 @@ func TestPeakaWithASchemaIsTheCatalogThatHoldsIt(t *testing.T) {
 		}
 	}
 }
+
+func TestExportsCancelSendsNothingForAFinishedExport(t *testing.T) {
+	server, seen := fakeGateway(t, map[string]string{
+		"GET /data/projects/p/exports/e1":    `{"id":"e1","status":"SUCCEEDED"}`,
+		"GET /data/projects/p/exports/e2":    `{"id":"e2","status":"RUNNING"}`,
+		"DELETE /data/projects/p/exports/e2": ``,
+	})
+	_, errOut, err := runCmd(t, server, "json", newExportsCmd(), "cancel", "e1")
+	if err != nil || !strings.Contains(errOut, "already finished (SUCCEEDED)") {
+		t.Fatalf("%v %q", err, errOut)
+	}
+	if len(*seen) != 1 {
+		t.Fatalf("a cancel was sent for a finished export: %v", *seen)
+	}
+	*seen = nil
+	if _, _, err := runCmd(t, server, "json", newExportsCmd(), "cancel", "e2"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*seen) != 2 || (*seen)[1].Method != http.MethodDelete {
+		t.Fatalf("a running export was not cancelled: %v", *seen)
+	}
+}

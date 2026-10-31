@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -266,3 +267,25 @@ func newQueriesExportCmd() *cobra.Command {
 
 // marshal for debug/notes
 var _ = json.Marshal
+
+// skipFinishedExport sends no cancel for an export that has finished: the API answers it with the same empty
+// success as a real cancel, and "Cancelled." would be untrue.
+func skipFinishedExport(c *callCtx) error {
+	project, err := rt.needProject()
+	if err != nil {
+		return err
+	}
+	client, err := rt.api()
+	if err != nil {
+		return err
+	}
+	var job map[string]any
+	if err := client.Get(rt.Ctx, fmt.Sprintf("/data/projects/%s/exports/%s", project, url.PathEscape(c.Params["export"])), nil, &job); err != nil {
+		return err
+	}
+	if status := str(job["status"]); status != "" && status != "PENDING" && status != "RUNNING" {
+		rt.note("Export %s has already finished (%s); nothing to cancel.", c.Params["export"], status)
+		c.Path = ""
+	}
+	return nil
+}

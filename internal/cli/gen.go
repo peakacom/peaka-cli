@@ -49,7 +49,7 @@ type callCtx struct {
 	Params map[string]string // path parameters, resolved
 	Query  url.Values
 	Body   map[string]any
-	Path   string // template; Prepare may replace it
+	Path   string // template; Prepare may replace it, or empty it when there is nothing to send
 }
 
 // argSpec is one positional argument. Resolve turns the value into path
@@ -256,6 +256,9 @@ func (o opSpec) run(cmd *cobra.Command, args []string, values []*flagValue, from
 	if o.Prepare != nil {
 		if err := o.Prepare(c); err != nil {
 			return err
+		}
+		if c.Path == "" { // Prepare found there is nothing to send
+			return nil
 		}
 	}
 

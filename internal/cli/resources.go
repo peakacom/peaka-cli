@@ -291,7 +291,7 @@ func newExportsCmd() *cobra.Command {
 		opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show one export with its download links", Method: http.MethodGet, Path: "/data/projects/{project}/exports/{export}",
 			Args: []argSpec{{Name: "ID", Param: "export"}}},
 		opSpec{Use: "cancel ID", Short: "Cancel a running export", Method: http.MethodDelete, Path: "/data/projects/{project}/exports/{export}",
-			Args: []argSpec{{Name: "ID", Param: "export"}}, Empty: "Cancelled."},
+			Args: []argSpec{{Name: "ID", Param: "export"}}, Empty: "Cancelled.", Prepare: skipFinishedExport},
 	)
 	cmd.AddCommand(newExportsDownloadCmd(), newExportsWaitCmd())
 	return cmd
