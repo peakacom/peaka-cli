@@ -257,10 +257,12 @@ in the usual formats. For ad-hoc SQL, streaming and cancellation use ` + "`peaka
 					DataType string `json:"dataType"`
 					Value    any    `json:"value"`
 				} `json:"data"`
+				Tables []executedTable `json:"tables"`
 			}
 			if _, err := client.Do(rt.Ctx, http.MethodPost, fmt.Sprintf("/data/projects/%s/queries/execute", project), url.Values{"format": {"CELL_TYPED"}}, body, &res); err != nil {
 				return err
 			}
+			defer noteExecutedTables(res.Tables)
 			g := &output.Grid{}
 			for _, c := range res.Columns {
 				g.Columns = append(g.Columns, str(c["columnName"]))
