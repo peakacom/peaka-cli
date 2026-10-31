@@ -29,7 +29,7 @@ type exportFlags struct {
 }
 
 func (f *exportFlags) bind(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&f.format, "format-out", "CSV", "output format: CSV, JSON, JSONL, PARQUET")
+	cmd.Flags().StringVar(&f.format, "format-out", "CSV", "output format: CSV or JSONL")
 	cmd.Flags().StringVar(&f.compression, "compression", "", "NONE or GZIP")
 	cmd.Flags().IntVar(&f.limit, "limit", 0, "row limit (1..1000000)")
 	cmd.Flags().StringSliceVar(&f.columns, "columns", nil, "columns to export (default: all)")
@@ -246,7 +246,7 @@ func newQueriesExportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "export ID|NAME",
 		ValidArgsFunction: argCompleter(completeQueries),
-		Short:             "Export a saved query's result to files (CSV, JSON, JSONL, PARQUET)",
+		Short:             "Export a saved query's result to files (CSV or JSONL)",
 		Long: `  peaka queries export daily_revenue --format-out PARQUET --wait
   peaka queries export daily_revenue --out ./exports          # wait and download
   peaka queries export daily_revenue --out - | head             # stream the file to stdout`,

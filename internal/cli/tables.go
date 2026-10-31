@@ -82,7 +82,7 @@ func newTablesCmd() *cobra.Command {
 	export := &cobra.Command{
 		Use:               "export TABLE",
 		ValidArgsFunction: argCompleter(completeDotted(3)),
-		Short:             "Export catalog.schema.table to files (CSV, JSON, JSONL, PARQUET)",
+		Short:             "Export catalog.schema.table to files (CSV or JSONL)",
 		Long: `  peaka tables export stripe.payment.charges --format-out PARQUET --wait
   peaka tables export stripe.payment.charges --limit 1000 --out ./exports`,
 		Args: cobra.ExactArgs(1),

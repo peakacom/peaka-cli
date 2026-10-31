@@ -64,7 +64,15 @@ schemas with their table counts: narrow with --catalog and --schema, or use
 			q := url.Values{}
 			if catalog != "" {
 				p := map[string]string{}
-				if err := resolveOneCatalog(rt, catalog, p); err != nil {
+				if err := resolveCatalog(rt, catalog, p); err != nil {
+					return err
+				}
+				if schema != "" {
+					err = pickCatalogForSchema(rt, p, schema)
+				} else {
+					err = needOneCatalog(catalog, p)
+				}
+				if err != nil {
 					return err
 				}
 				q.Set("catalogId", p["catalog"])

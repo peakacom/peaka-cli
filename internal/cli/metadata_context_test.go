@@ -37,7 +37,13 @@ func fakeGateway(t *testing.T, answers map[string]string) (*httptest.Server, *[]
 		w.Header().Set("Content-Type", "application/json")
 		switch req.Path {
 		case "/data/projects/p/catalogs":
-			_, _ = w.Write([]byte(`[{"id":"111","name":"stripe"}]`))
+			_, _ = w.Write([]byte(`[{"id":"1","name":"peaka"},{"id":"2","name":"peaka"},{"id":"111","name":"stripe"}]`))
+			return
+		case "/data/projects/p/catalogs/1/schemas":
+			_, _ = w.Write([]byte(`[{"schemaName":"table"},{"schemaName":"bitable"}]`))
+			return
+		case "/data/projects/p/catalogs/2/schemas":
+			_, _ = w.Write([]byte(`[{"schemaName":"query"},{"schemaName":"mtquery"}]`))
 			return
 		case "/data/projects/p/catalogs/111/schemas":
 			_, _ = w.Write([]byte(`[{"schemaName":"payment"}]`))
@@ -225,5 +231,35 @@ func TestQueriesExecuteNotesLiveAndPreparingTables(t *testing.T) {
 	if !strings.Contains(errOut, "live from the source") || !strings.Contains(errOut, "stripe.payment.charges") ||
 		!strings.Contains(errOut, "hubspot.crm.deals") || strings.Contains(errOut, "stripe.payment.customers") {
 		t.Fatalf("%q", errOut)
+	}
+}
+
+func TestPeakaWithASchemaIsTheCatalogThatHoldsIt(t *testing.T) {
+	server, seen := fakeGateway(t, map[string]string{
+		"GET /metadata/p/table-list": `{"status":"listed","list":""}`,
+		"GET /metadata/p":            `{"catalogs":[],"schemas":[],"tables":[]}`,
+		"GET /metadata/p/tables":     `{"items":[]}`,
+	})
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"table-list", "--catalog", "peaka", "--schema", "query"}, "2"},
+		{[]string{"describe", "--catalog", "peaka", "--schema", "table", "--format-out", "compact"}, "1"},
+		{[]string{"list", "--catalog", "Peaka", "--schema", "mtquery"}, "2"},
+	} {
+		*seen = nil
+		if _, _, err := runCmd(t, server, "json", newMetadataCmd(), c.args...); err != nil {
+			t.Fatal(c.args, err)
+		}
+		if got := (*seen)[0].Query.Get("catalogId"); got != c.want {
+			t.Fatalf("%v: catalogId %q, want %q", c.args, got, c.want)
+		}
+	}
+	for _, args := range [][]string{{"table-list", "--catalog", "peaka"}, {"describe", "--catalog", "peaka"}} {
+		*seen = nil
+		if _, _, err := runCmd(t, server, "json", newMetadataCmd(), args...); err == nil || len(*seen) != 0 {
+			t.Fatalf("%v: peaka without a schema was sent: %v %v", args, err, *seen)
+		}
 	}
 }

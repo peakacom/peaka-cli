@@ -507,6 +507,19 @@ func needOneCatalog(ref string, params map[string]string) error {
 	return nil
 }
 
+// oneCatalogForSchema is a Prepare step for commands with --catalog and a schemaName query parameter: a name
+// that matches several catalogs (peaka: the tables and the saved queries) is narrowed by the schema, and is
+// refused only when no schema was given.
+func oneCatalogForSchema(c *callCtx) error {
+	if c.Params["catalog"] == "" {
+		return nil
+	}
+	if schema := c.Query.Get("schemaName"); schema != "" {
+		return pickCatalogForSchema(rt, c.Params, schema)
+	}
+	return needOneCatalog(c.Params["catalogName"], c.Params)
+}
+
 // pickCatalogForSchema narrows an ambiguous catalog to the id whose schemas include schema.
 func pickCatalogForSchema(r *Runtime, params map[string]string, schema string) error {
 	ids := catalogIDs(params)
