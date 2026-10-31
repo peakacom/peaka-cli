@@ -319,12 +319,23 @@ func newSemanticCatalogsCmd() *cobra.Command {
 
 func newMetadataCmd() *cobra.Command {
 	cmd := group("metadata", "AI metadata: descriptions, relations, golden SQL and semantics of the project's tables", nil,
-		opSpec{Use: "describe", Aliases: []string{"get"}, Short: "Project metadata (all, or one catalog or schema)", Method: http.MethodGet, Path: "/metadata/{project}", Unwrap: "metadata",
+		opSpec{Use: "describe", Aliases: []string{"get"}, Short: "Project metadata (all, one catalog or schema, or chosen tables)", Method: http.MethodGet, Path: "/metadata/{project}", Unwrap: "metadata",
+			Long: `With --format-out compact the answer is short JSON {catalogs, schemas, tables} meant
+for writing SQL; ddl gives the same as CREATE TABLE text. Pick the tables from
+` + "`peaka metadata table-list`" + ` first and read only those.
+
+  peaka metadata describe --table stripe.payment.customers --table stripe.payment.charges --format-out compact
+  peaka metadata describe --table samplebank_oracle.samplebank.accounts --format-out ddl --samples
+  peaka metadata describe --format-out compact --levels catalogs,schemas`,
 			Flags: []flagSpec{
 				{Name: "catalog", Help: "catalog id or name", Resolve: resolveOneCatalog},
 				{Name: "schema", In: "query", Key: "schemaName", Help: "schema name"},
+				{Name: "table", Kind: "strings", In: "query", Help: "only this catalog.schema.table; repeatable, up to 20"},
+				{Name: "format-out", In: "query", Key: "format", Help: "compact (short JSON) or ddl (CREATE TABLE text); default is the full metadata"},
+				{Name: "levels", In: "query", Help: "with --format-out: which levels to include, e.g. catalogs,schemas,tables"},
+				{Name: "samples", Kind: "bool", In: "query", Help: "with --format-out: include sample column values"},
 			},
-			Prepare: paramsIntoQuery("catalog", "catalogId")},
+			Prepare: chain(paramsIntoQuery("catalog", "catalogId"), prepareMetadataShape)},
 		opSpec{Use: "list", Short: "One page of collected table metadata, including AI-excluded tables", Method: http.MethodGet, Path: "/metadata/{project}/tables",
 			Flags: []flagSpec{
 				{Name: "catalog", Help: "catalog id or name", Resolve: resolveOneCatalog},
@@ -365,6 +376,9 @@ func newMetadataCmd() *cobra.Command {
 	)
 	cmd.AddCommand(
 		newMetadataRefreshCmd(),
+		newMetadataTableListCmd(),
+		newMetadataRelevantTablesCmd(),
+		newMetadataDescriptionsCmd(),
 		group("relations", "Relations between tables, used by the AI agent for joins", nil,
 			opSpec{Use: "list CATALOG", Short: "Relations of a catalog", Method: http.MethodGet, Path: "/metadata/{project}/relations/{catalog}",
 				Args: []argSpec{{Name: "CATALOG", Resolve: resolveOneCatalog}}},
