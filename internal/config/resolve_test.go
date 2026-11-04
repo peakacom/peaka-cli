@@ -92,3 +92,20 @@ func TestConfigurationsOnDisk(t *testing.T) {
 		t.Fatalf("default should load empty: %v %+v", err, c)
 	}
 }
+
+func TestDefaultConfigurationCanBeActivatedWithoutAFile(t *testing.T) {
+	t.Setenv("PEAKA_CONFIG_DIR", t.TempDir())
+	t.Setenv("PEAKA_CONFIGURATION", "")
+	if _, err := Create("e2e"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetActive("e2e"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetActive(DefaultName); err != nil || ActiveName() != DefaultName {
+		t.Fatalf("back to default: %v, active %q", err, ActiveName())
+	}
+	if err := SetActive("missing"); err == nil {
+		t.Fatal("a missing configuration was activated")
+	}
+}

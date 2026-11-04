@@ -291,7 +291,7 @@ func newExportsCmd() *cobra.Command {
 		opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show one export with its download links", Method: http.MethodGet, Path: "/data/projects/{project}/exports/{export}",
 			Args: []argSpec{{Name: "ID", Param: "export"}}},
 		opSpec{Use: "cancel ID", Short: "Cancel a running export", Method: http.MethodDelete, Path: "/data/projects/{project}/exports/{export}",
-			Args: []argSpec{{Name: "ID", Param: "export"}}, Empty: "Cancelled."},
+			Args: []argSpec{{Name: "ID", Param: "export"}}, Empty: "Cancelled.", Prepare: skipFinishedExport},
 	)
 	cmd.AddCommand(newExportsDownloadCmd(), newExportsWaitCmd())
 	return cmd
@@ -319,19 +319,30 @@ func newSemanticCatalogsCmd() *cobra.Command {
 
 func newMetadataCmd() *cobra.Command {
 	cmd := group("metadata", "AI metadata: descriptions, relations, golden SQL and semantics of the project's tables", nil,
-		opSpec{Use: "describe", Aliases: []string{"get"}, Short: "Project metadata (all, or one catalog or schema)", Method: http.MethodGet, Path: "/metadata/{project}", Unwrap: "metadata",
+		opSpec{Use: "describe", Aliases: []string{"get"}, Short: "Project metadata (all, one catalog or schema, or chosen tables)", Method: http.MethodGet, Path: "/metadata/{project}", Unwrap: "metadata",
+			Long: `With --format-out compact the answer is short JSON {catalogs, schemas, tables} meant
+for writing SQL; ddl gives the same as CREATE TABLE text. Pick the tables from
+` + "`peaka metadata table-list`" + ` first and read only those.
+
+  peaka metadata describe --table stripe.payment.customers --table stripe.payment.charges --format-out compact
+  peaka metadata describe --table samplebank_oracle.samplebank.accounts --format-out ddl --samples
+  peaka metadata describe --format-out compact --levels catalogs,schemas`,
 			Flags: []flagSpec{
-				{Name: "catalog", Help: "catalog id or name", Resolve: resolveOneCatalog},
+				{Name: "catalog", Help: "catalog id or name", Resolve: resolveCatalog},
 				{Name: "schema", In: "query", Key: "schemaName", Help: "schema name"},
+				{Name: "table", Kind: "strings", In: "query", Help: "only this catalog.schema.table; repeatable, up to 20"},
+				{Name: "format-out", In: "query", Key: "format", Help: "compact (short JSON) or ddl (CREATE TABLE text); default is the full metadata"},
+				{Name: "levels", In: "query", Help: "with --format-out: which levels to include, e.g. catalogs,schemas,tables"},
+				{Name: "samples", Kind: "bool", In: "query", Help: "with --format-out: include sample column values"},
 			},
-			Prepare: paramsIntoQuery("catalog", "catalogId")},
+			Prepare: chain(oneCatalogForSchema, paramsIntoQuery("catalog", "catalogId"), prepareMetadataShape)},
 		opSpec{Use: "list", Short: "One page of collected table metadata, including AI-excluded tables", Method: http.MethodGet, Path: "/metadata/{project}/tables",
 			Flags: []flagSpec{
-				{Name: "catalog", Help: "catalog id or name", Resolve: resolveOneCatalog},
+				{Name: "catalog", Help: "catalog id or name", Resolve: resolveCatalog},
 				{Name: "schema", In: "query", Key: "schemaName", Help: "schema name"},
 				{Name: "limit", In: "query", Help: "page size, 1–50 (default 20)"},
 				{Name: "cursor", In: "query", Help: "nextCursor from the previous page; keep the same filters and limit"},
-			}, Prepare: paramsIntoQuery("catalog", "catalogId")},
+			}, Prepare: chain(oneCatalogForSchema, paramsIntoQuery("catalog", "catalogId"))},
 		opSpec{Use: "status CATALOG", Short: "Status of the metadata refresh job of a catalog", Method: http.MethodGet, Path: "/metadata/{project}/refresh/{catalog}",
 			Args: []argSpec{{Name: "CATALOG", Resolve: resolveOneCatalog}}},
 		opSpec{Use: "update TABLE", Short: "Set a table's description, columns and AI usage (catalog.schema.table)", Method: http.MethodPut, Path: "/metadata/{project}/{catalog}/{schema}/{table}", Body: true,
@@ -354,7 +365,7 @@ func newMetadataCmd() *cobra.Command {
 			Flags:   []flagSpec{{Name: "top-k", Kind: "int", In: "query", Key: "topK", Help: "number of results"}},
 			Prepare: paramsIntoQuery("q", "table")},
 		opSpec{Use: "questions", Short: "Generate sample questions the AI agent can answer", Method: http.MethodGet, Path: "/metadata/{project}/questions/generate",
-			Flags: []flagSpec{{Name: "about", In: "query", Key: "question", Help: "a seed question"}}},
+			Flags: []flagSpec{{Name: "about", In: "query", Key: "question", Help: "a seed question", Required: true}}},
 		opSpec{Use: "generate-semantics TABLE", Short: "Generate semantics for a table with the AI agent", Method: http.MethodPost, Path: "/metadata/{project}/semantics/{catalog}/{schema}/{table}", Body: true,
 			Args: []argSpec{{Name: "TABLE", Resolve: resolveTable}},
 			Flags: []flagSpec{
@@ -365,6 +376,9 @@ func newMetadataCmd() *cobra.Command {
 	)
 	cmd.AddCommand(
 		newMetadataRefreshCmd(),
+		newMetadataTableListCmd(),
+		newMetadataRelevantTablesCmd(),
+		newMetadataDescriptionsCmd(),
 		group("relations", "Relations between tables, used by the AI agent for joins", nil,
 			opSpec{Use: "list CATALOG", Short: "Relations of a catalog", Method: http.MethodGet, Path: "/metadata/{project}/relations/{catalog}",
 				Args: []argSpec{{Name: "CATALOG", Resolve: resolveOneCatalog}}},
@@ -446,7 +460,7 @@ func newDriversCmd() *cobra.Command {
 			Flags: []flagSpec{{Name: "catalog", In: "query", Key: "catalogName", Help: "catalog name"}}},
 		opSpec{Use: "jdbc", Short: "The JDBC driver", Method: http.MethodGet, Path: "/supportedDrivers/jdbc"},
 		opSpec{Use: "sqlalchemy", Short: "The SQLAlchemy driver", Method: http.MethodGet, Path: "/supportedDrivers/sql_alchemy",
-			Flags: []flagSpec{{Name: "catalog", In: "query", Key: "catalogName", Help: "catalog name"}}},
+			Flags: []flagSpec{{Name: "catalog", In: "query", Key: "catalogName", Help: "catalog name", Required: true}}},
 	)
 }
 

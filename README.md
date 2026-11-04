@@ -36,6 +36,10 @@ peaka cache create --table hubspot.crm.deals --full-refresh '0 3 * * *'
 peaka queries create --name won_deals --sql-file won.sql --path /sales
 peaka queries execute won_deals --format csv
 peaka folders tree --queries
+peaka metadata table-list                            # every table on one line: start a data question here
+peaka metadata describe --format-out compact --table hubspot.crm.deals --table hubspot.crm.companies
+peaka metadata relevant-tables "deals closed last month"   # when the table list is too large
+peaka metadata descriptions set catalog hubspot "Our CRM" --version 3
 peaka metadata refresh --catalog hubspot --wait
 peaka metadata update hubspot.crm.deals --description "Open and closed deals" --use-with-ai
 peaka ai chat "How many deals closed last month?"

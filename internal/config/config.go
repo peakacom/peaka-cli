@@ -72,9 +72,9 @@ func ActiveName() string {
 	return DefaultName
 }
 
-// SetActive makes name the active configuration; it must exist.
+// SetActive makes name the active configuration; it must exist, except "default", which may have no file.
 func SetActive(name string) error {
-	if !Exists(name) {
+	if !Exists(name) && name != DefaultName {
 		return fmt.Errorf("configuration %q does not exist", name)
 	}
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {

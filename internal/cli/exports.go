@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ type exportFlags struct {
 }
 
 func (f *exportFlags) bind(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&f.format, "format-out", "CSV", "output format: CSV, JSON, JSONL, PARQUET")
+	cmd.Flags().StringVar(&f.format, "format-out", "CSV", "output format: CSV or JSONL")
 	cmd.Flags().StringVar(&f.compression, "compression", "", "NONE or GZIP")
 	cmd.Flags().IntVar(&f.limit, "limit", 0, "row limit (1..1000000)")
 	cmd.Flags().StringSliceVar(&f.columns, "columns", nil, "columns to export (default: all)")
@@ -52,9 +53,8 @@ func (f *exportFlags) body() map[string]any {
 	if len(f.columns) > 0 {
 		b["columns"] = f.columns
 	}
-	if f.systemColumns {
-		b["includeSystemColumns"] = true
-	}
+	// Always sent: the API includes system columns unless told not to, and --system-columns says they are opt-in.
+	b["includeSystemColumns"] = f.systemColumns
 	csv := map[string]any{}
 	if f.csvDelimiter != "" {
 		csv["delimiter"] = f.csvDelimiter
@@ -75,8 +75,12 @@ func (r *Runtime) startExport(path string, f *exportFlags) error {
 		return err
 	}
 	var job record
-	if _, err := client.Do(r.Ctx, http.MethodPost, path, nil, f.body(), &job); err != nil {
+	resp, err := client.Do(r.Ctx, http.MethodPost, path, nil, f.body(), &job)
+	if err != nil {
 		return err
+	}
+	if resp.Status == 0 { // --dry-run printed the request
+		return nil
 	}
 	if !f.wait && f.out == "" {
 		r.note("Export %s %s. `peaka exports describe %s` shows its progress; `peaka exports download %s` fetches the files.", str(job["id"]), str(job["status"]), str(job["id"]), str(job["id"]))
@@ -246,7 +250,7 @@ func newQueriesExportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "export ID|NAME",
 		ValidArgsFunction: argCompleter(completeQueries),
-		Short:             "Export a saved query's result to files (CSV, JSON, JSONL, PARQUET)",
+		Short:             "Export a saved query's result to files (CSV or JSONL)",
 		Long: `  peaka queries export daily_revenue --format-out PARQUET --wait
   peaka queries export daily_revenue --out ./exports          # wait and download
   peaka queries export daily_revenue --out - | head             # stream the file to stdout`,
@@ -266,3 +270,25 @@ func newQueriesExportCmd() *cobra.Command {
 
 // marshal for debug/notes
 var _ = json.Marshal
+
+// skipFinishedExport sends no cancel for an export that has finished: the API answers it with the same empty
+// success as a real cancel, and "Cancelled." would be untrue.
+func skipFinishedExport(c *callCtx) error {
+	project, err := rt.needProject()
+	if err != nil {
+		return err
+	}
+	client, err := rt.api()
+	if err != nil {
+		return err
+	}
+	var job map[string]any
+	if err := client.Get(rt.Ctx, fmt.Sprintf("/data/projects/%s/exports/%s", project, url.PathEscape(c.Params["export"])), nil, &job); err != nil {
+		return err
+	}
+	if status := str(job["status"]); status != "" && status != "PENDING" && status != "RUNNING" {
+		rt.note("Export %s has already finished (%s); nothing to cancel.", c.Params["export"], status)
+		c.Path = ""
+	}
+	return nil
+}

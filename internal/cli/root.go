@@ -282,6 +282,9 @@ func (r *Runtime) outputOptions() output.Options {
 
 // print renders a result on stdout.
 func (r *Runtime) print(v any) error {
+	if gf.dryRun && v == nil { // the request was printed instead of sent
+		return nil
+	}
 	return output.Print(r.Out, v, r.outputOptions())
 }
 

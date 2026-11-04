@@ -299,10 +299,42 @@ func mcpTools() []mcpTool {
 			}},
 		{Name: "peaka_refresh_materialized_query", Description: "Refresh a materialized query now.", Params: []mcpParam{query, projectParam},
 			Args: func(a map[string]any) []string { return []string{"queries", "refresh", sarg(a, "query")} }},
-		{Name: "peaka_get_project_metadata", Description: "AI metadata of the project's tables (descriptions, columns, relations); narrow with catalog and schema.",
-			Params: []mcpParam{{Name: "catalog", Description: "catalog id or name"}, {Name: "schema", Description: "schema name"}, projectParam},
+		{Name: "peaka_table_list", Description: "Start here for a data question: every table of the project on one line (description start, some columns, joins), grouped by catalog.schema in the `list` field. When status is too_large, narrow with catalog/schema or use peaka_search_relevant_tables.",
+			Params: []mcpParam{{Name: "catalog", Description: "only this catalog (id or name)"}, {Name: "schema", Description: "only this schema"}, projectParam},
 			Args: func(a map[string]any) []string {
-				return cat([]string{"metadata", "describe"}, opt(a, "catalog", "--catalog"), opt(a, "schema", "--schema"))
+				return cat([]string{"metadata", "table-list"}, opt(a, "catalog", "--catalog"), opt(a, "schema", "--schema"))
+			}},
+		{Name: "peaka_search_relevant_tables", Description: "The tables most likely to answer a question, ranked; use when peaka_table_list is too large.",
+			Params: []mcpParam{{Name: "question", Description: "the question", Required: true}, {Name: "limit", Description: "number of tables, 1-10", Type: "integer"}, projectParam},
+			Args: func(a map[string]any) []string {
+				out := []string{"metadata", "relevant-tables", sarg(a, "question")}
+				if v, ok := a["limit"].(float64); ok {
+					out = append(out, "--limit", strconv.Itoa(int(v)))
+				}
+				return out
+			}},
+		{Name: "peaka_get_project_metadata", Description: "Metadata of the project's tables. To write SQL pass the chosen tables (from peaka_table_list) with format compact: columns, keys, relations, descriptions, short. Without tables and format: the full metadata, narrowed by catalog and schema.",
+			Params: []mcpParam{
+				{Name: "tables", Description: "catalog.schema.table names, up to 20", Type: "array"},
+				{Name: "format", Description: "compact (short JSON) or ddl (CREATE TABLE text)"},
+				{Name: "levels", Description: "with format: levels to include, e.g. catalogs,schemas,tables"},
+				{Name: "samples", Description: "with format: include sample column values", Type: "boolean"},
+				{Name: "catalog", Description: "catalog id or name"}, {Name: "schema", Description: "schema name"}, projectParam,
+			},
+			Args: func(a map[string]any) []string {
+				out := cat([]string{"metadata", "describe"}, opt(a, "catalog", "--catalog"), opt(a, "schema", "--schema"),
+					opt(a, "format", "--format-out"), opt(a, "levels", "--levels"), optBool(a, "samples", "--samples"))
+				if xs, ok := a["tables"].([]any); ok {
+					for _, x := range xs {
+						out = append(out, "--table", str(x))
+					}
+				}
+				return out
+			}},
+		{Name: "peaka_list_descriptions", Description: "Catalog and schema descriptions with their versions and whether they are editable here.",
+			Params: []mcpParam{{Name: "catalog", Description: "only this catalog (id or name)"}, projectParam},
+			Args: func(a map[string]any) []string {
+				return cat([]string{"metadata", "descriptions", "list"}, opt(a, "catalog", "--catalog"))
 			}},
 		{Name: "peaka_refresh_project_metadata", Description: "Rebuild the AI metadata of the project or of one catalog (with catalog: waits for the job).",
 			Params: []mcpParam{{Name: "catalog", Description: "catalog id or name"}, projectParam},

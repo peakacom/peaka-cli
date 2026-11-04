@@ -49,7 +49,7 @@ type callCtx struct {
 	Params map[string]string // path parameters, resolved
 	Query  url.Values
 	Body   map[string]any
-	Path   string // template; Prepare may replace it
+	Path   string // template; Prepare may replace it, or empty it when there is nothing to send
 }
 
 // argSpec is one positional argument. Resolve turns the value into path
@@ -256,6 +256,9 @@ func (o opSpec) run(cmd *cobra.Command, args []string, values []*flagValue, from
 	if o.Prepare != nil {
 		if err := o.Prepare(c); err != nil {
 			return err
+		}
+		if c.Path == "" { // Prepare found there is nothing to send
+			return nil
 		}
 	}
 
@@ -505,6 +508,19 @@ func needOneCatalog(ref string, params map[string]string) error {
 		return api.Exit(api.ExitInvalid, "%d catalogs are named %q; use an id: %s", len(ids), ref, strings.Join(ids, ", "))
 	}
 	return nil
+}
+
+// oneCatalogForSchema is a Prepare step for commands with --catalog and a schemaName query parameter: a name
+// that matches several catalogs (peaka: the tables and the saved queries) is narrowed by the schema, and is
+// refused only when no schema was given.
+func oneCatalogForSchema(c *callCtx) error {
+	if c.Params["catalog"] == "" {
+		return nil
+	}
+	if schema := c.Query.Get("schemaName"); schema != "" {
+		return pickCatalogForSchema(rt, c.Params, schema)
+	}
+	return needOneCatalog(c.Params["catalogName"], c.Params)
 }
 
 // pickCatalogForSchema narrows an ambiguous catalog to the id whose schemas include schema.

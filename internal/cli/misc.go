@@ -257,10 +257,12 @@ in the usual formats. For ad-hoc SQL, streaming and cancellation use ` + "`peaka
 					DataType string `json:"dataType"`
 					Value    any    `json:"value"`
 				} `json:"data"`
+				Tables []executedTable `json:"tables"`
 			}
 			if _, err := client.Do(rt.Ctx, http.MethodPost, fmt.Sprintf("/data/projects/%s/queries/execute", project), url.Values{"format": {"CELL_TYPED"}}, body, &res); err != nil {
 				return err
 			}
+			defer noteExecutedTables(res.Tables)
 			g := &output.Grid{}
 			for _, c := range res.Columns {
 				g.Columns = append(g.Columns, str(c["columnName"]))
@@ -370,7 +372,9 @@ func newAIChatCmd() *cobra.Command {
 		Long: `  peaka ai chat "How many deals closed last month?"
   peaka ai chat "…" --thread THREAD_ID          # continue a conversation
   peaka ai chat "…" --no-execute                 # the SQL, without running it
-  peaka ai chat "…" --stream                     # server-sent events as they arrive (jsonl)`,
+  peaka ai chat "…" --stream                     # server-sent events as they arrive (jsonl)
+
+An answer can take minutes: without --timeout this command waits up to 10m.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project, err := rt.needProject()
@@ -383,6 +387,10 @@ func newAIChatCmd() *cobra.Command {
 			}
 			if noExecute {
 				body["noExecute"] = true
+			}
+			// An answer takes minutes (retrieval, SQL, checks), longer than the per-request default.
+			if f := cmd.Flags().Lookup("timeout"); f != nil && !f.Changed && gf.timeout < aiChatTimeout {
+				gf.timeout = aiChatTimeout
 			}
 			client, err := rt.api()
 			if err != nil {
@@ -420,6 +428,10 @@ func newAIChatCmd() *cobra.Command {
 				if line == "" || strings.HasPrefix(line, ":") {
 					continue
 				}
+				// The event name repeats the data's type; only data lines are output, one JSON value each.
+				if strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") || strings.HasPrefix(line, "retry:") {
+					continue
+				}
 				line = strings.TrimPrefix(line, "data:")
 				line = strings.TrimSpace(line)
 				if rt.StdoutTTY && rt.Settings.Format == "table" {
@@ -444,6 +456,9 @@ func newAIChatCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&stream, "stream", false, "stream the answer as it is produced")
 	return cmd
 }
+
+// aiChatTimeout is how long `ai chat` waits for an answer unless --timeout is given.
+const aiChatTimeout = 10 * time.Minute
 
 func newAIWorkflowCmd() *cobra.Command {
 	var out string
