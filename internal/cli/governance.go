@@ -533,16 +533,40 @@ func applyGovernance(file string) error {
 		report = append(report, entry)
 	}
 
-	// Tags, by label.
+	// What the file names, found before anything is sent: a label or name that is two records is refused, as the
+	// change would go to one of them by chance (R5-6).
 	existing, err := listAt(rt, base+"/tags")
 	if err != nil {
 		return err
 	}
-	byLabel := map[string]string{}
-	for _, x := range existing {
-		if t, ok := x["tag"].(map[string]any); ok {
-			byLabel[strings.ToUpper(str(t["label"]))] = str(t["id"])
+	tagsByLabel := index(existing, func(x record) (string, string) {
+		t, _ := x["tag"].(map[string]any)
+		return strings.ToUpper(str(t["label"])), str(t["id"])
+	})
+	rules, err := listAt(rt, base+"/row-rules")
+	if err != nil {
+		return err
+	}
+	rulesByName := index(rules, func(r record) (string, string) { return strings.ToLower(str(r["name"])), str(r["id"]) })
+	var ambiguous []string
+	for _, t := range want.Tags {
+		ambiguous = append(ambiguous, twice(tagsByLabel, strings.ToUpper(t.Label), "tag")...)
+	}
+	for _, ct := range want.ColumnTags {
+		ambiguous = append(ambiguous, twice(tagsByLabel, strings.ToUpper(ct.Tag), "tag")...)
+	}
+	for _, rr := range want.RowRules {
+		ambiguous = append(ambiguous, twice(rulesByName, strings.ToLower(rr.Name), "row rule")...)
+		if rr.Tag != "" {
+			ambiguous = append(ambiguous, twice(tagsByLabel, strings.ToUpper(rr.Tag), "tag")...)
 		}
+	}
+	if len(ambiguous) > 0 {
+		return api.Exit(api.ExitConflict, "nothing was applied: %s; rename them in Peaka first", strings.Join(unique(ambiguous), "; "))
+	}
+	byLabel := map[string]string{}
+	for k, ids := range tagsByLabel {
+		byLabel[k] = ids[0]
 	}
 	for _, t := range want.Tags {
 		rules := make([]any, len(t.Rules))
@@ -567,10 +591,11 @@ func applyGovernance(file string) error {
 		if existing, err = listAt(rt, base+"/tags"); err != nil {
 			return err
 		}
-		for _, x := range existing {
-			if t, ok := x["tag"].(map[string]any); ok {
-				byLabel[strings.ToUpper(str(t["label"]))] = str(t["id"])
-			}
+		for k, ids := range index(existing, func(x record) (string, string) {
+			t, _ := x["tag"].(map[string]any)
+			return strings.ToUpper(str(t["label"])), str(t["id"])
+		}) {
+			byLabel[k] = ids[0]
 		}
 	}
 
@@ -608,17 +633,20 @@ func applyGovernance(file string) error {
 	}
 
 	// Row rules, by name.
-	rules, err := listAt(rt, base+"/row-rules")
-	if err != nil {
-		return err
-	}
-	byName := map[string]string{}
+	ruleByID := map[string]record{}
 	for _, r := range rules {
-		byName[strings.ToLower(str(r["name"]))] = str(r["id"])
+		ruleByID[str(r["id"])] = r
 	}
 	for _, rr := range want.RowRules {
 		enabled := rr.Enabled == nil || *rr.Enabled
-		if id, ok := byName[strings.ToLower(rr.Name)]; ok {
+		if ids, ok := rulesByName[strings.ToLower(rr.Name)]; ok {
+			id := ids[0]
+			// A rule's target never changes (a new target is a new rule): one named for another target is refused,
+			// not reported done (R5-7).
+			if why := otherTarget(ruleByID[id], rr.Table, byLabel[strings.ToUpper(rr.Tag)], rr.Tag, project); why != "" {
+				note("row rule", rr.Name, "update", nil, fmt.Errorf("%s; give the rule another name, or change it in Peaka", why))
+				continue
+			}
 			resp, err := send(client, http.MethodPut, base+"/row-rules/"+id, map[string]any{"expression": rr.Expression, "enabled": enabled})
 			note("row rule", rr.Name, "update", resp, err)
 			continue
@@ -650,6 +678,65 @@ func applyGovernance(file string) error {
 		}
 	}
 	return nil
+}
+
+// index groups records by a key: label or name to ids.
+func index(rs []record, keyOf func(record) (string, string)) map[string][]string {
+	out := map[string][]string{}
+	for _, r := range rs {
+		k, id := keyOf(r)
+		if k != "" && id != "" {
+			out[k] = append(out[k], id)
+		}
+	}
+	return out
+}
+
+func twice(idx map[string][]string, key, what string) []string {
+	if ids := idx[key]; len(ids) > 1 {
+		return []string{fmt.Sprintf("%d %ss are named %q (%s)", len(ids), what, key, strings.Join(ids, ", "))}
+	}
+	return nil
+}
+
+func unique(xs []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, x := range xs {
+		if !seen[x] {
+			seen[x] = true
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// otherTarget says how an existing rule's target differs from the file's (a table in the project, or a tag); "" when
+// it is the same.
+func otherTarget(existing record, table, tagID, tagLabel, project string) string {
+	switch {
+	case tagLabel != "":
+		if str(existing["targetType"]) != "TAG" || str(existing["tagId"]) != tagID {
+			return fmt.Sprintf("the rule is on %s, not on the tag %s", describeTarget(existing), tagLabel)
+		}
+	case table != "":
+		sameTable := strings.EqualFold(str(existing["table"]), table) ||
+			strings.EqualFold(str(existing["catalogName"])+"."+str(existing["schemaName"])+"."+str(existing["tableName"]), table)
+		if str(existing["targetType"]) == "TAG" || !sameTable || (project != "" && str(existing["projectId"]) != project) {
+			return fmt.Sprintf("the rule is on %s, not on %s", describeTarget(existing), table)
+		}
+	}
+	return ""
+}
+
+func describeTarget(r record) string {
+	if str(r["targetType"]) == "TAG" {
+		return "the tag " + str(r["tagId"])
+	}
+	if t := str(r["table"]); t != "" {
+		return t + " in project " + str(r["projectId"])
+	}
+	return str(r["catalogName"]) + "." + str(r["schemaName"]) + "." + str(r["tableName"]) + " in project " + str(r["projectId"])
 }
 
 // send writes; under --dry-run the client prints the request instead.
