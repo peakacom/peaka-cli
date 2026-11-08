@@ -185,8 +185,16 @@ func listAt(r *Runtime, path string) ([]record, error) {
 	if err != nil {
 		return nil, err
 	}
+	query := url.Values{}
+	if p, q, found := strings.Cut(path, "?"); found {
+		path = p
+		if query, err = url.ParseQuery(q); err != nil {
+			return nil, err
+		}
+	}
+	query.Set("limit", "500")
 	var raw json.RawMessage
-	if err := client.Get(r.Ctx, path, url.Values{"limit": {"500"}}, &raw); err != nil {
+	if err := client.Get(r.Ctx, path, query, &raw); err != nil {
 		return nil, err
 	}
 	var page struct {
@@ -529,9 +537,7 @@ func applyGovernance(file string) error {
 	if err != nil {
 		return err
 	}
-	tagsByLabel := index(existing, func(x record) (string, string) {
-		return strings.ToUpper(str(x["name"])), str(x["id"])
-	})
+	tagsByLabel := index(existing, tagKey)
 	rules, err := listAt(rt, base+"/row-rules")
 	if err != nil {
 		return err
@@ -583,10 +589,7 @@ func applyGovernance(file string) error {
 		if existing, err = listAt(rt, base+"/tags"); err != nil {
 			return err
 		}
-		for k, ids := range index(existing, func(x record) (string, string) {
-			t, _ := x["tag"].(map[string]any)
-			return strings.ToUpper(str(t["label"])), str(t["id"])
-		}) {
+		for k, ids := range index(existing, tagKey) {
 			byLabel[k] = ids[0]
 		}
 	}
@@ -674,6 +677,11 @@ func applyGovernance(file string) error {
 		}
 	}
 	return nil
+}
+
+// tagKey indexes the public API's tags by name, whatever its case.
+func tagKey(x record) (string, string) {
+	return strings.ToUpper(str(x["name"])), str(x["id"])
 }
 
 // index groups records by a key: label or name to ids.

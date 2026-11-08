@@ -47,3 +47,11 @@ func TestOtherTarget(t *testing.T) {
 		}
 	}
 }
+
+// Tags are indexed by the public API's flat name, after a create as before it.
+func TestTagKeyReadsTheFlatName(t *testing.T) {
+	idx := index([]record{{"id": "a", "name": "Phi"}}, tagKey)
+	if ids := idx["PHI"]; len(ids) != 1 || ids[0] != "a" {
+		t.Fatalf("PHI is tag a: %v", idx)
+	}
+}
