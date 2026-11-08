@@ -179,7 +179,8 @@ func newGrantsCmd() *cobra.Command {
 
 // ==================== resolvers and body shaping ====================
 
-// listAt reads a list of the public API: a page's items (the first 500), or a bare array.
+// listAt reads a list of the public API whole: every page, following nextCursor until hasMore is false (Codex review
+// round 6, R6-7: a name past the first page was missed, and apply made it again), or a bare array.
 func listAt(r *Runtime, path string) ([]record, error) {
 	client, err := r.api()
 	if err != nil {
@@ -193,20 +194,35 @@ func listAt(r *Runtime, path string) ([]record, error) {
 		}
 	}
 	query.Set("limit", "500")
-	var raw json.RawMessage
-	if err := client.Get(r.Ctx, path, query, &raw); err != nil {
-		return nil, err
-	}
-	var page struct {
-		Items []record `json:"items"`
-	}
-	if trimmed := strings.TrimSpace(string(raw)); strings.HasPrefix(trimmed, "{") && strings.Contains(trimmed, `"items"`) {
+	var all []record
+	seen := map[string]bool{}
+	for {
+		var raw json.RawMessage
+		if err := client.Get(r.Ctx, path, query, &raw); err != nil {
+			return nil, err
+		}
+		trimmed := strings.TrimSpace(string(raw))
+		if !strings.HasPrefix(trimmed, "{") || !strings.Contains(trimmed, `"items"`) {
+			return listOf(raw)
+		}
+		var page struct {
+			Items      []record `json:"items"`
+			NextCursor string   `json:"nextCursor"`
+			HasMore    bool     `json:"hasMore"`
+		}
 		if err := decodeJSON(raw, &page); err != nil {
 			return nil, err
 		}
-		return page.Items, nil
+		all = append(all, page.Items...)
+		if !page.HasMore || page.NextCursor == "" {
+			return all, nil
+		}
+		if seen[page.NextCursor] {
+			return nil, fmt.Errorf("the list of %s repeats a page", path)
+		}
+		seen[page.NextCursor] = true
+		query.Set("cursor", page.NextCursor)
 	}
-	return listOf(raw)
 }
 
 // resolveTag: a tag's id or name.

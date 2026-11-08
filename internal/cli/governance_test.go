@@ -1,8 +1,16 @@
 package cli
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/peakacom/peaka-cli/internal/api"
+	"github.com/peakacom/peaka-cli/internal/config"
 )
 
 // Codex review round 5, R5-6: a label or name that is two records is refused before anything is sent.
@@ -53,5 +61,27 @@ func TestTagKeyReadsTheFlatName(t *testing.T) {
 	idx := index([]record{{"id": "a", "name": "Phi"}}, tagKey)
 	if ids := idx["PHI"]; len(ids) != 1 || ids[0] != "a" {
 		t.Fatalf("PHI is tag a: %v", idx)
+	}
+}
+
+// R6-7: listAt follows nextCursor to the last page.
+func TestListAtReadsEveryPage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch req.URL.Query().Get("cursor") {
+		case "":
+			fmt.Fprint(w, `{"items":[{"id":"a","name":"A"}],"nextCursor":"c2","hasMore":true}`)
+		case "c2":
+			fmt.Fprint(w, `{"items":[{"id":"b","name":"B"}],"nextCursor":null,"hasMore":false}`)
+		}
+	}))
+	defer srv.Close()
+	r := &Runtime{Ctx: context.Background(), Settings: &config.Settings{Source: map[string]string{}}, client: api.New(srv.URL, "test", time.Second)}
+	got, err := listAt(r, "/organizations/o/governance/tags")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || str(got[1]["id"]) != "b" {
+		t.Fatalf("both pages: %v", got)
 	}
 }
