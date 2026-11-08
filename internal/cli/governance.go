@@ -181,6 +181,9 @@ func newGrantsCmd() *cobra.Command {
 
 // listAt reads a list of the public API whole: every page, following nextCursor until hasMore is false (Codex review
 // round 6, R6-7: a name past the first page was missed, and apply made it again), or a bare array.
+// maxPages bounds how many pages listAt reads.
+const maxPages = 2000
+
 func listAt(r *Runtime, path string) ([]record, error) {
 	client, err := r.api()
 	if err != nil {
@@ -196,7 +199,11 @@ func listAt(r *Runtime, path string) ([]record, error) {
 	query.Set("limit", "500")
 	var all []record
 	seen := map[string]bool{}
-	for {
+	for pages := 0; ; pages++ {
+		// A bound on a list that never ends (Codex review round 7): 2,000 pages of 500 is a million records.
+		if pages == maxPages {
+			return nil, fmt.Errorf("the list of %s has more than %d pages; stopped", path, maxPages)
+		}
 		var raw json.RawMessage
 		if err := client.Get(r.Ctx, path, query, &raw); err != nil {
 			return nil, err
@@ -214,8 +221,12 @@ func listAt(r *Runtime, path string) ([]record, error) {
 			return nil, err
 		}
 		all = append(all, page.Items...)
-		if !page.HasMore || page.NextCursor == "" {
+		if !page.HasMore {
 			return all, nil
+		}
+		// More, with no way to ask for it: a partial list would read as the whole one, and apply would make a duplicate.
+		if page.NextCursor == "" {
+			return nil, fmt.Errorf("the list of %s says there is more but gives no cursor", path)
 		}
 		if seen[page.NextCursor] {
 			return nil, fmt.Errorf("the list of %s repeats a page", path)

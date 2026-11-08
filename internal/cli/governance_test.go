@@ -85,3 +85,15 @@ func TestListAtReadsEveryPage(t *testing.T) {
 		t.Fatalf("both pages: %v", got)
 	}
 }
+
+func TestListAtRefusesMoreWithoutACursor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"items":[{"id":"a","name":"A"}],"nextCursor":null,"hasMore":true}`)
+	}))
+	defer srv.Close()
+	r := &Runtime{Ctx: context.Background(), Settings: &config.Settings{Source: map[string]string{}}, client: api.New(srv.URL, "test", time.Second)}
+	if _, err := listAt(r, "/organizations/o/governance/tags"); err == nil {
+		t.Fatal("a list that says there is more with no cursor is not the whole list")
+	}
+}
