@@ -24,70 +24,71 @@ func newGovernanceCmd() *cobra.Command {
 	cmd.AddCommand(
 		group("tags", "Classification tags and their masking rules", []string{"tag"},
 			opSpec{Use: "list", Short: "List tags with their masking rules", Method: http.MethodGet, Path: govPath + "/tags",
-				Fields: []string{"tag.id", "tag.label", "tag.active", "maskRules"}},
+				Unwrap: "items", Fields: []string{"id", "name", "active", "maskRules"}},
 			opSpec{Use: "describe TAG", Aliases: []string{"get"}, Short: "Show a tag", Method: http.MethodGet, Path: govPath + "/tags/{tag}",
 				Args: []argSpec{{Name: "TAG", Resolve: resolveTag}}},
 			opSpec{Use: "create", Short: "Create a tag", Method: http.MethodPost, Path: govPath + "/tags", Body: true,
 				Long: `A tag masks the columns it is on, for each reader by its rules (in order).
 
-  peaka gov tags create --label PHI --description "Protected health information" \
+  peaka gov tags create --name PHI --description "Protected health information" \
       --rule everyone=Nullify --rule group:Clinicians=Unmasked
   peaka gov tags create --from-file phi.json`,
 				Flags: []flagSpec{
-					{Name: "label", Help: "the tag's name", Required: true},
+					{Name: "name", Help: "the tag's name, unique in the organization", Required: true},
 					{Name: "description", Help: "what it classifies"},
 					{Name: "active", Kind: "bool", Help: "masks while active", Default: true},
 					{Name: "rule", Kind: "strings", Help: "a masking rule WHO=MASK, in order: everyone, user:ID, group:NAME|ID, role:ID; MASK a mask name or id; repeatable", Set: rulesSetter},
 				},
 				Prepare: resolveRuleNames},
-			opSpec{Use: "update TAG", Short: "Replace a tag's label, description, state and rules (202: waits for approval)", Method: http.MethodPut,
+			opSpec{Use: "update TAG", Short: "Change a tag's name, description, state or rules; what is not given stays (202: waits for approval)", Method: http.MethodPatch,
 				Path: govPath + "/tags/{tag}", Body: true, Args: []argSpec{{Name: "TAG", Resolve: resolveTag}},
 				Flags: []flagSpec{
-					{Name: "label", Help: "the tag's name"},
+					{Name: "name", Help: "the tag's name"},
 					{Name: "description", Help: "what it classifies"},
 					{Name: "active", Kind: "bool", Help: "masks while active"},
 					{Name: "rule", Kind: "strings", Help: "the masking rules WHO=MASK, in order (replaces them); repeatable", Set: rulesSetter},
 				},
-				Prepare: chain(resolveRuleNames, keepTagFields)},
+				Prepare: resolveRuleNames},
 			opSpec{Use: "delete TAG", Short: "Delete a tag and take it off every column (202: waits for approval)", Method: http.MethodDelete,
 				Path: govPath + "/tags/{tag}", Args: []argSpec{{Name: "TAG", Resolve: resolveTag}}, Confirm: "Delete tag {0} and take it off every column?", Empty: "Deleted."},
 		),
 		group("masks", "Masks: the predefined ones and the organization's custom masks", []string{"mask"},
-			opSpec{Use: "list", Short: "List masks", Method: http.MethodGet, Path: govPath + "/masks", Fields: []string{"id", "label", "expression", "predefined"}},
+			opSpec{Use: "list", Short: "List masks", Method: http.MethodGet, Path: govPath + "/masks", Unwrap: "items", Fields: []string{"id", "key", "name", "expression", "predefined"}},
 			opSpec{Use: "create", Short: "Create a custom mask", Method: http.MethodPost, Path: govPath + "/masks", Body: true,
-				Long: "  peaka gov masks create --label \"Last four\" --expression \"concat('***', substr({col}, -4))\"",
+				Long: "  peaka gov masks create --name \"Last four\" --expression \"concat('***', substr({col}, -4))\"",
 				Flags: []flagSpec{
-					{Name: "label", Help: "the mask's name", Required: true},
+					{Name: "name", Help: "the mask's name", Required: true},
 					{Name: "expression", Help: "SQL over {col}", Required: true},
 					{Name: "description", Help: "what it shows"},
 				}},
-			opSpec{Use: "update MASK", Short: "Change a custom mask (202: waits for approval when rules use it)", Method: http.MethodPut, Path: govPath + "/masks/{mask}",
+			opSpec{Use: "update MASK", Short: "Change a custom mask (202: waits for approval when rules use it)", Method: http.MethodPatch, Path: govPath + "/masks/{mask}",
 				Body: true, Args: []argSpec{{Name: "MASK", Resolve: resolveMask}},
-				Flags: []flagSpec{{Name: "label", Help: "the mask's name"}, {Name: "expression", Help: "SQL over {col}"}, {Name: "description", Help: "what it shows"}}},
+				Flags: []flagSpec{{Name: "name", Help: "the mask's name"}, {Name: "expression", Help: "SQL over {col}"}, {Name: "description", Help: "what it shows"}}},
 			opSpec{Use: "delete MASK", Short: "Delete a custom mask", Method: http.MethodDelete, Path: govPath + "/masks/{mask}",
 				Args: []argSpec{{Name: "MASK", Resolve: resolveMask}}, Confirm: "Delete mask {0}?", Empty: "Deleted."},
 		),
 		group("column-tags", "The tags on columns", []string{"columns"},
 			opSpec{Use: "list CATALOG_ID SCHEMA TABLE", Short: "List the tags on a table's columns", Method: http.MethodGet,
-				Path:   govPath + "/projects/{project}/catalogs/{catalog}/schemas/{schema}/tables/{table}/column-tags",
-				Args:   []argSpec{{Name: "CATALOG_ID", Param: "catalog"}, {Name: "SCHEMA", Param: "schema"}, {Name: "TABLE", Param: "table"}},
-				Fields: []string{"id", "columnName", "tagId", "origin", "reason"}},
+				Path:    govPath + "/column-tags",
+				Args:    []argSpec{{Name: "CATALOG_ID", Param: "catalog"}, {Name: "SCHEMA", Param: "schema"}, {Name: "TABLE", Param: "table"}},
+				Prepare: chain(projectIntoQuery, paramsIntoQuery("catalog", "catalogId", "schema", "schema", "table", "table")),
+				Unwrap:  "items", Fields: []string{"id", "column", "tagId", "origin", "reason"}},
 			opSpec{Use: "add", Short: "Put a tag on a column", Method: http.MethodPost, Path: govPath + "/column-tags", Body: true,
 				Long: "  peaka gov column-tags add --catalog-id 1 --catalog-name peaka --schema table --table patients --column ssn --tag PHI",
-				Flags: append(tableFlags(), flagSpec{Name: "column", Key: "columnName", Help: "the column", Required: true},
-					flagSpec{Name: "tag", Help: "tag label or id", Required: true, Resolve: resolveTag},
+				Flags: append(tableFlags(), flagSpec{Name: "column", Key: "column", Help: "the column", Required: true},
+					flagSpec{Name: "tag", Help: "tag name or id", Required: true, Resolve: resolveTag},
 					flagSpec{Name: "reason", Help: "why"}),
 				Prepare: chain(projectIntoBody, paramsIntoBody("tag", "tagId"))},
 			opSpec{Use: "apply", Short: "Put a tag on every column of a schema whose name matches a pattern", Method: http.MethodPost, Path: govPath + "/column-tags/apply", Body: true,
 				Long: "  peaka gov column-tags apply --catalog-id 7 --schema public --pattern '*ssn*' --tag PHI --preview",
 				Flags: []flagSpec{
 					{Name: "catalog-id", Key: "catalogId", Help: "the catalog's id", Required: true},
-					{Name: "schema", Key: "schemaName", Help: "the schema", Required: true},
+					{Name: "schema", Key: "schema", Help: "the schema", Required: true},
 					{Name: "table", Key: "tables", Kind: "strings", Help: "only these tables; repeatable"},
 					{Name: "pattern", Key: "columnPattern", Help: "column names: * any characters, ? one", Required: true},
-					{Name: "tag", Help: "tag label or id", Required: true, Resolve: resolveTag},
+					{Name: "tag", Help: "tag name or id", Required: true, Resolve: resolveTag},
 					{Name: "reason", Help: "why"},
-					{Name: "preview", Key: "dryRun", Kind: "bool", Help: "list the matches, change nothing"},
+					{Name: "preview", Key: "preview", Kind: "bool", Help: "list the matches, change nothing"},
 				},
 				Prepare: chain(projectIntoBody, paramsIntoBody("tag", "tagId"))},
 			opSpec{Use: "remove ID", Short: "Take a tag off a column (202: waits for approval)", Method: http.MethodDelete, Path: govPath + "/column-tags/{id}",
@@ -95,7 +96,7 @@ func newGovernanceCmd() *cobra.Command {
 		),
 		group("row-rules", "Row rules: a condition on every read of a table, or of every table with a tagged column", []string{"row-rule", "rules"},
 			opSpec{Use: "list", Short: "List row rules", Method: http.MethodGet, Path: "/organizations/{org}/governance/row-rules",
-				Fields: []string{"id", "name", "targetType", "table", "tagId", "enabled", "expression"}},
+				Unwrap: "items", Fields: []string{"id", "name", "target.type", "target.table", "target.tagId", "enabled", "expression"}},
 			opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show a row rule", Method: http.MethodGet, Path: govPath + "/row-rules/{id}",
 				Args: []argSpec{{Name: "ID", Param: "id"}}},
 			opSpec{Use: "create", Short: "Write a row rule on a table or a tag", Method: http.MethodPost, Path: govPath + "/row-rules", Body: true,
@@ -106,12 +107,12 @@ func newGovernanceCmd() *cobra.Command {
 				Flags: []flagSpec{
 					{Name: "name", Help: "the rule's name", Required: true},
 					{Name: "table", Help: "catalog.schema.table, as the project's SQL names it"},
-					{Name: "tag", Help: "tag label or id", Resolve: resolveTag},
+					{Name: "tag", Help: "tag name or id", Resolve: resolveTag},
 					{Name: "expression", Help: "a SQL condition", Required: true},
 					{Name: "enabled", Kind: "bool", Help: "applies", Default: true},
 				},
 				Prepare: rowRuleTarget},
-			opSpec{Use: "update ID", Short: "Change a row rule (202: waits for approval)", Method: http.MethodPut, Path: govPath + "/row-rules/{id}", Body: true,
+			opSpec{Use: "update ID", Short: "Change a row rule's name, condition or state (202: waits for approval)", Method: http.MethodPatch, Path: govPath + "/row-rules/{id}", Body: true,
 				Args:  []argSpec{{Name: "ID", Param: "id"}},
 				Flags: []flagSpec{{Name: "name", Help: "the rule's name"}, {Name: "expression", Help: "a SQL condition"}, {Name: "enabled", Kind: "bool", Help: "applies"}}},
 			opSpec{Use: "delete ID", Short: "Delete a row rule (202: waits for approval)", Method: http.MethodDelete, Path: govPath + "/row-rules/{id}",
@@ -122,7 +123,17 @@ func newGovernanceCmd() *cobra.Command {
 			opSpec{Use: "events", Short: "Classification changes, newest first (-f kind=TAG_APPLIED,ROW_RULE_CREATED -f since=… -f cursor=…)",
 				Method: http.MethodGet, Path: govPath + "/audit-events", Query: true, Unwrap: "items",
 				Fields: []string{"occurredAt", "kind", "actor", "subject.tag", "subject.table", "subject.column", "reason"}},
-			opSpec{Use: "export", Short: "Decision records and policy changes as NDJSON (-f from=… -f to=…)", Method: http.MethodGet, Path: govPath + "/audit-log/export", Query: true},
+			opSpec{Use: "export", Short: "Decision records and policy changes as NDJSON (-f since=… -f until=…)", Method: http.MethodGet, Path: govPath + "/audit-events/export", Query: true},
+		),
+		group("changes", "Changes waiting for a second administrator", []string{"change-requests", "approvals"},
+			opSpec{Use: "list", Short: "Changes waiting for approval (-f status=ALL for every one)", Method: http.MethodGet, Path: govPath + "/change-requests",
+				Query: true, Unwrap: "items", Fields: []string{"id", "kind", "summary", "status", "requestedBy", "createdAt"}},
+			opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show a change request", Method: http.MethodGet, Path: govPath + "/change-requests/{id}",
+				Args: []argSpec{{Name: "ID", Param: "id"}}},
+			opSpec{Use: "approve ID", Short: "Apply a change another administrator asked for", Method: http.MethodPost, Path: govPath + "/change-requests/{id}/approve",
+				Body: true, Args: []argSpec{{Name: "ID", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why; kept in the Audit log"}}},
+			opSpec{Use: "reject ID", Short: "Refuse a change (your own: withdraw it)", Method: http.MethodPost, Path: govPath + "/change-requests/{id}/reject",
+				Body: true, Args: []argSpec{{Name: "ID", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why; kept in the Audit log"}}},
 		),
 		newGovernanceApplyCmd(),
 	)
@@ -131,7 +142,7 @@ func newGovernanceCmd() *cobra.Command {
 
 func newGroupsCmd() *cobra.Command {
 	return group("groups", "The organization's groups and their members", []string{"group"},
-		opSpec{Use: "list", Short: "List groups", Method: http.MethodGet, Path: "/organizations/{org}/groups", Fields: []string{"id", "name", "sqlName", "description"}},
+		opSpec{Use: "list", Short: "List groups", Method: http.MethodGet, Path: "/organizations/{org}/groups", Unwrap: "items", Fields: []string{"id", "name", "sqlName", "memberCount", "directoryManaged"}},
 		opSpec{Use: "describe GROUP", Aliases: []string{"get"}, Short: "Show a group", Method: http.MethodGet, Path: "/organizations/{org}/groups/{group}",
 			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}}},
 		opSpec{Use: "create", Short: "Create a group", Method: http.MethodPost, Path: "/organizations/{org}/groups", Body: true,
@@ -139,8 +150,8 @@ func newGroupsCmd() *cobra.Command {
 		opSpec{Use: "delete GROUP", Short: "Delete a group", Method: http.MethodDelete, Path: "/organizations/{org}/groups/{group}",
 			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}}, Confirm: "Delete group {0}?", Empty: "Deleted."},
 		opSpec{Use: "members GROUP", Short: "List a group's members", Method: http.MethodGet, Path: "/organizations/{org}/groups/{group}/members",
-			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}}},
-		opSpec{Use: "add-member GROUP USER_ID", Short: "Add a member to a group", Method: http.MethodPost, Path: "/organizations/{org}/groups/{group}/members/{user}",
+			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}}, Unwrap: "items", Fields: []string{"userId", "email", "firstName", "lastName", "kind"}},
+		opSpec{Use: "add-member GROUP USER_ID", Short: "Add a member to a group (a member already in it stays)", Method: http.MethodPut, Path: "/organizations/{org}/groups/{group}/members/{user}",
 			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}, {Name: "USER_ID", Param: "user"}}, Empty: "Added."},
 		opSpec{Use: "remove-member GROUP USER_ID", Short: "Remove a member from a group", Method: http.MethodDelete, Path: "/organizations/{org}/groups/{group}/members/{user}",
 			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}, {Name: "USER_ID", Param: "user"}}, Empty: "Removed."},
@@ -153,7 +164,7 @@ func newGrantsCmd() *cobra.Command {
 	path := "/organizations/{org}/workspaces/{ws}/projects/{project}/grants"
 	return group("grants", "Roles members and groups hold on the project in context (or a workspace)", []string{"roles-on"},
 		opSpec{Use: "list", Short: "List roles given on the project or workspace", Method: http.MethodGet, Path: path, Flags: scope,
-			Prepare: grantPath, Fields: []string{"grantId", "entityType", "email", "name", "roleName"}},
+			Prepare: grantPath, Unwrap: "items", Fields: []string{"id", "principal.type", "principal.name", "principal.email", "role.name"}},
 		opSpec{Use: "add", Short: "Give a member or group a role", Method: http.MethodPost, Path: path, Body: true,
 			Long: "  peaka grants add --group Clinicians --role 1a6f5d6c-…\n  peaka grants add --workspace Lab --user 5b4d915b-… --role …",
 			Flags: append(scope,
@@ -168,33 +179,37 @@ func newGrantsCmd() *cobra.Command {
 
 // ==================== resolvers and body shaping ====================
 
+// listAt reads a list of the public API: a page's items (the first 500), or a bare array.
 func listAt(r *Runtime, path string) ([]record, error) {
 	client, err := r.api()
 	if err != nil {
 		return nil, err
 	}
 	var raw json.RawMessage
-	if err := client.Get(r.Ctx, path, nil, &raw); err != nil {
+	if err := client.Get(r.Ctx, path, url.Values{"limit": {"500"}}, &raw); err != nil {
 		return nil, err
+	}
+	var page struct {
+		Items []record `json:"items"`
+	}
+	if trimmed := strings.TrimSpace(string(raw)); strings.HasPrefix(trimmed, "{") && strings.Contains(trimmed, `"items"`) {
+		if err := decodeJSON(raw, &page); err != nil {
+			return nil, err
+		}
+		return page.Items, nil
 	}
 	return listOf(raw)
 }
 
-// resolveTag: a tag's id or label (the list nests each as {tag: {...}, maskRules}).
+// resolveTag: a tag's id or name.
 func resolveTag(r *Runtime, ref string, params map[string]string) error {
 	org, err := r.orgID()
 	if err != nil {
 		return err
 	}
-	rs, err := listAt(r, fmt.Sprintf("/organizations/%s/governance/tags", org))
+	tags, err := listAt(r, fmt.Sprintf("/organizations/%s/governance/tags", org))
 	if err != nil {
 		return err
-	}
-	var tags []record
-	for _, x := range rs {
-		if t, ok := x["tag"].(map[string]any); ok {
-			tags = append(tags, record{"id": t["id"], "name": t["label"]})
-		}
 	}
 	t, err := matchOne(tags, ref, "tag")
 	if err != nil {
@@ -204,19 +219,30 @@ func resolveTag(r *Runtime, ref string, params map[string]string) error {
 	return nil
 }
 
-func resolveMask(r *Runtime, ref string, params map[string]string) error {
+// masksForMatch: masks by id, name or a predefined mask's key.
+func masksForMatch(r *Runtime) ([]record, error) {
 	org, err := r.orgID()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	rs, err := listAt(r, fmt.Sprintf("/organizations/%s/governance/masks", org))
+	masks, err := listAt(r, fmt.Sprintf("/organizations/%s/governance/masks", org))
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range masks {
+		if k := str(m["key"]); k != "" {
+			m["displayName"] = k
+		}
+	}
+	return masks, nil
+}
+
+func resolveMask(r *Runtime, ref string, params map[string]string) error {
+	masks, err := masksForMatch(r)
 	if err != nil {
 		return err
 	}
-	for _, m := range rs {
-		m["name"] = m["label"]
-	}
-	m, err := matchOne(rs, ref, "mask")
+	m, err := matchOne(masks, ref, "mask")
 	if err != nil {
 		return err
 	}
@@ -229,16 +255,9 @@ func resolveGroup(r *Runtime, ref string, params map[string]string) error {
 	if err != nil {
 		return err
 	}
-	rs, err := listAt(r, fmt.Sprintf("/organizations/%s/groups", org))
+	groups, err := listAt(r, fmt.Sprintf("/organizations/%s/groups", org))
 	if err != nil {
 		return err
-	}
-	var groups []record
-	for _, x := range rs {
-		if g, ok := x["group"].(map[string]any); ok {
-			x = record(g)
-		}
-		groups = append(groups, x)
 	}
 	g, err := matchOne(groups, ref, "group")
 	if err != nil {
@@ -277,6 +296,7 @@ func grantPath(c *callCtx) error {
 	return nil
 }
 
+// grantee: who gets the role, as the API's principal.
 func grantee(c *callCtx) error {
 	user, _ := c.Body["user"].(string)
 	delete(c.Body, "user")
@@ -284,31 +304,33 @@ func grantee(c *callCtx) error {
 	case c.Params["group"] != "" && user != "":
 		return usage("give the role to a group or a user, not both")
 	case c.Params["group"] != "":
-		c.Body["entityType"], c.Body["entityId"] = "group", c.Params["group"]
+		c.Body["principal"] = map[string]any{"type": "group", "id": c.Params["group"]}
 	case user != "":
-		c.Body["entityType"], c.Body["entityId"] = "user", user
+		c.Body["principal"] = map[string]any{"type": "user", "id": user}
 	default:
 		return usage("name who gets the role: --group or --user")
 	}
 	return nil
 }
 
+// rowRuleTarget: what the rule is on, as the API's target.
 func rowRuleTarget(c *callCtx) error {
 	table, _ := c.Body["table"].(string)
+	delete(c.Body, "table")
 	switch {
 	case c.Params["tag"] != "" && table != "":
 		return usage("a row rule is on a table or on a tag, not both")
 	case c.Params["tag"] != "":
-		c.Body["tagId"] = c.Params["tag"]
 		if expr, _ := c.Body["expression"].(string); !strings.Contains(expr, "{col}") {
 			return usage("a rule on a tag names the tagged column as {col}")
 		}
+		c.Body["target"] = map[string]any{"type": "tag", "tagId": c.Params["tag"]}
 	case table != "":
 		p, err := rt.needProject()
 		if err != nil {
 			return err
 		}
-		c.Body["projectId"] = p
+		c.Body["target"] = map[string]any{"type": "table", "projectId": p, "table": table}
 	default:
 		return usage("name what the rule is on: --table or --tag")
 	}
@@ -325,18 +347,26 @@ func projectIntoBody(c *callCtx) error {
 	return nil
 }
 
+// projectIntoQuery: the project in context, for lists filtered by it.
+func projectIntoQuery(c *callCtx) error {
+	p, err := rt.needProject()
+	if err != nil {
+		return err
+	}
+	c.Query.Set("projectId", p)
+	return nil
+}
+
 func tableFlags() []flagSpec {
 	return []flagSpec{
 		{Name: "catalog-id", Key: "catalogId", Help: "the catalog's id (1 for Peaka tables)", Required: true},
-		{Name: "catalog-name", Key: "catalogName", Help: "the catalog's name in SQL"},
-		{Name: "schema", Key: "schemaName", Help: "the schema", Required: true},
-		{Name: "table", Key: "tableName", Help: "the table", Required: true},
+		{Name: "catalog-name", Key: "catalog", Help: "the catalog's name in SQL"},
+		{Name: "schema", Key: "schema", Help: "the schema", Required: true},
+		{Name: "table", Key: "table", Help: "the table", Required: true},
 	}
 }
 
-const everyoneID = "00000000-0000-0000-0000-000000000001"
-
-// rulesSetter keeps the WHO=MASK rules as written; resolveRuleNames turns names into ids.
+// rulesSetter keeps the WHO=MASK rules as written; resolveRuleNames turns them into the API's rules.
 func rulesSetter(v any, body map[string]any) {
 	var rules []any
 	for _, s := range v.([]string) {
@@ -345,7 +375,7 @@ func rulesSetter(v any, body map[string]any) {
 	body["maskRules"] = rules
 }
 
-// resolveRuleNames: everyone, user:ID, group:NAME|ID, role:ID; a mask by name or id.
+// resolveRuleNames: WHO is everyone, user:ID, group:NAME|ID or role:ID; MASK a mask's id, name or key.
 func resolveRuleNames(c *callCtx) error {
 	raw, ok := c.Body["maskRules"].([]any)
 	if !ok {
@@ -364,80 +394,38 @@ func resolveRuleNames(c *callCtx) error {
 			return usage("a rule is WHO=MASK: %q", s)
 		}
 		if masks == nil {
-			org, err := rt.orgID()
-			if err != nil {
+			var err error
+			if masks, err = masksForMatch(rt); err != nil {
 				return err
-			}
-			if masks, err = listAt(rt, fmt.Sprintf("/organizations/%s/governance/masks", org)); err != nil {
-				return err
-			}
-			for _, m := range masks {
-				m["name"] = m["label"]
 			}
 		}
 		m, err := matchOne(masks, mask, "mask")
 		if err != nil {
 			return err
 		}
-		rule := map[string]any{"maskId": str(m["id"])}
+		subject := map[string]any{}
 		kind, id, _ := strings.Cut(who, ":")
 		switch strings.ToLower(kind) {
 		case "everyone":
-			rule["entityType"], rule["entityId"] = "user", everyoneID
-		case "user":
-			rule["entityType"], rule["entityId"] = "user", id
+			subject["type"] = "everyone"
+		case "user", "role":
+			subject["type"], subject["id"] = strings.ToLower(kind), id
 		case "group":
 			p := map[string]string{}
 			if err := resolveGroup(rt, id, p); err != nil {
 				return err
 			}
-			rule["entityType"], rule["entityId"] = "group", p["group"]
-		case "role":
-			rule["roleId"] = id
+			subject["type"], subject["id"] = "group", p["group"]
 		default:
 			return usage("who is everyone, user:ID, group:NAME or role:ID: %q", who)
 		}
-		out = append(out, rule)
+		maskID := str(m["key"])
+		if maskID == "" {
+			maskID = str(m["id"])
+		}
+		out = append(out, map[string]any{"subject": subject, "maskId": maskID})
 	}
 	c.Body["maskRules"] = out
-	return nil
-}
-
-// keepTagFields: an update replaces the tag; what the flags leave out is read from the tag as it is.
-func keepTagFields(c *callCtx) error {
-	org, err := rt.orgID()
-	if err != nil {
-		return err
-	}
-	client, err := rt.api()
-	if err != nil {
-		return err
-	}
-	var current struct {
-		Tag       map[string]any   `json:"tag"`
-		MaskRules []map[string]any `json:"maskRules"`
-	}
-	if err := client.Get(rt.Ctx, fmt.Sprintf("/organizations/%s/governance/tags/%s", org, c.Params["tag"]), nil, &current); err != nil {
-		return err
-	}
-	for _, k := range []string{"label", "description", "active"} {
-		if _, set := c.Body[k]; !set {
-			c.Body[k] = current.Tag[k]
-		}
-	}
-	if _, set := c.Body["maskRules"]; !set {
-		var rules []any
-		for _, r := range current.MaskRules {
-			rule := map[string]any{"maskId": r["maskId"]}
-			for _, k := range []string{"entityType", "entityId", "roleId", "customMaskExpression"} {
-				if r[k] != nil {
-					rule[k] = r[k]
-				}
-			}
-			rules = append(rules, rule)
-		}
-		c.Body["maskRules"] = rules
-	}
 	return nil
 }
 
@@ -446,7 +434,8 @@ func keepTagFields(c *callCtx) error {
 // govFile is what `governance apply` reads: the tags and row rules an organization should have.
 type govFile struct {
 	Tags []struct {
-		Label       string   `yaml:"label"`
+		Name        string   `yaml:"name"`
+		Label       string   `yaml:"label"` // the older word for name
 		Description string   `yaml:"description"`
 		Active      *bool    `yaml:"active"`
 		Rules       []string `yaml:"rules"`
@@ -461,6 +450,7 @@ type govFile struct {
 	ColumnTags []struct {
 		CatalogID   string `yaml:"catalogId"`
 		CatalogName string `yaml:"catalogName"`
+		Catalog     string `yaml:"catalog"`
 		Schema      string `yaml:"schema"`
 		Table       string `yaml:"table"`
 		Column      string `yaml:"column"`
@@ -474,13 +464,13 @@ func newGovernanceApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply -f FILE",
 		Short: "Make the organization's tags, row rules and column tags what a YAML file says",
-		Long: `Creates what is missing and updates what differs, by tag label and row rule name; a column tag already there is
+		Long: `Creates what is missing and updates what differs, by tag name and row rule name; a column tag already there is
 left as it is; nothing is deleted. Tags come first, then column tags, then row rules (a rule on a tag needs a
 tagged column).
 A change that reveals classified data may wait for a second administrator (202): it is reported, not retried.
 
   tags:
-    - label: PHI
+    - name: PHI
       description: Protected health information
       rules: ["group:Clinicians=Unmasked", "everyone=Nullify"]
   rowRules:
@@ -488,7 +478,7 @@ A change that reveals classified data may wait for a second administrator (202):
       tag: REGION
       expression: "{col} = current_user_props('region')"
   columnTags:
-    - {catalogId: "1", catalogName: peaka, schema: table, table: patients, column: ssn, tag: PHI}
+    - {catalogId: "1", catalog: peaka, schema: table, table: patients, column: ssn, tag: PHI}
 
   peaka gov apply -f governance.yaml [--dry-run]`,
 		Args: cobra.NoArgs,
@@ -540,8 +530,7 @@ func applyGovernance(file string) error {
 		return err
 	}
 	tagsByLabel := index(existing, func(x record) (string, string) {
-		t, _ := x["tag"].(map[string]any)
-		return strings.ToUpper(str(t["label"])), str(t["id"])
+		return strings.ToUpper(str(x["name"])), str(x["id"])
 	})
 	rules, err := listAt(rt, base+"/row-rules")
 	if err != nil {
@@ -549,8 +538,11 @@ func applyGovernance(file string) error {
 	}
 	rulesByName := index(rules, func(r record) (string, string) { return strings.ToLower(str(r["name"])), str(r["id"]) })
 	var ambiguous []string
-	for _, t := range want.Tags {
-		ambiguous = append(ambiguous, twice(tagsByLabel, strings.ToUpper(t.Label), "tag")...)
+	for i := range want.Tags {
+		if want.Tags[i].Name == "" {
+			want.Tags[i].Name = want.Tags[i].Label
+		}
+		ambiguous = append(ambiguous, twice(tagsByLabel, strings.ToUpper(want.Tags[i].Name), "tag")...)
 	}
 	for _, ct := range want.ColumnTags {
 		ambiguous = append(ambiguous, twice(tagsByLabel, strings.ToUpper(ct.Tag), "tag")...)
@@ -573,18 +565,18 @@ func applyGovernance(file string) error {
 		for i, r := range t.Rules {
 			rules[i] = r
 		}
-		c := &callCtx{Params: map[string]string{}, Body: map[string]any{"label": t.Label, "description": t.Description, "active": t.Active == nil || *t.Active,
+		c := &callCtx{Params: map[string]string{}, Body: map[string]any{"name": t.Name, "description": t.Description, "active": t.Active == nil || *t.Active,
 			"maskRules": rules}}
 		if err := resolveRuleNames(c); err != nil {
-			note("tag", t.Label, "resolve", nil, err)
+			note("tag", t.Name, "resolve", nil, err)
 			continue
 		}
-		if id, ok := byLabel[strings.ToUpper(t.Label)]; ok {
-			resp, err := send(client, http.MethodPut, base+"/tags/"+id, c.Body)
-			note("tag", t.Label, "update", resp, err)
+		if id, ok := byLabel[strings.ToUpper(t.Name)]; ok {
+			resp, err := send(client, http.MethodPatch, base+"/tags/"+id, c.Body)
+			note("tag", t.Name, "update", resp, err)
 		} else {
 			resp, err := send(client, http.MethodPost, base+"/tags", c.Body)
-			note("tag", t.Label, "create", resp, err)
+			note("tag", t.Name, "create", resp, err)
 		}
 	}
 	if len(want.Tags) > 0 && !gf.dryRun {
@@ -611,15 +603,15 @@ func applyGovernance(file string) error {
 			note("column tag", name, "add", nil, fmt.Errorf("no tag %q or no project in context", ct.Tag))
 			continue
 		}
-		there, err := listAt(rt, fmt.Sprintf("%s/projects/%s/catalogs/%s/schemas/%s/tables/%s/column-tags", base, project,
-			url.PathEscape(ct.CatalogID), url.PathEscape(ct.Schema), url.PathEscape(ct.Table)))
+		there, err := listAt(rt, base+"/column-tags?"+url.Values{"projectId": {project}, "catalogId": {ct.CatalogID},
+			"schema": {ct.Schema}, "table": {ct.Table}}.Encode())
 		if err != nil {
 			note("column tag", name, "add", nil, err)
 			continue
 		}
 		tagged := false
 		for _, x := range there {
-			if strings.EqualFold(str(x["columnName"]), ct.Column) && str(x["tagId"]) == id {
+			if strings.EqualFold(str(x["column"]), ct.Column) && str(x["tagId"]) == id {
 				tagged = true
 			}
 		}
@@ -627,8 +619,12 @@ func applyGovernance(file string) error {
 			report = append(report, map[string]any{"kind": "column tag", "name": name, "action": "none", "result": "unchanged"})
 			continue
 		}
+		catalog := ct.Catalog
+		if catalog == "" {
+			catalog = ct.CatalogName
+		}
 		resp, err := send(client, http.MethodPost, base+"/column-tags", map[string]any{"projectId": project, "catalogId": ct.CatalogID,
-			"catalogName": ct.CatalogName, "schemaName": ct.Schema, "tableName": ct.Table, "columnName": ct.Column, "tagId": id, "reason": ct.Reason})
+			"catalog": catalog, "schema": ct.Schema, "table": ct.Table, "column": ct.Column, "tagId": id, "reason": ct.Reason})
 		note("column tag", name, "add", resp, err)
 	}
 
@@ -647,7 +643,7 @@ func applyGovernance(file string) error {
 				note("row rule", rr.Name, "update", nil, fmt.Errorf("%s; give the rule another name, or change it in Peaka", why))
 				continue
 			}
-			resp, err := send(client, http.MethodPut, base+"/row-rules/"+id, map[string]any{"expression": rr.Expression, "enabled": enabled})
+			resp, err := send(client, http.MethodPatch, base+"/row-rules/"+id, map[string]any{"expression": rr.Expression, "enabled": enabled})
 			note("row rule", rr.Name, "update", resp, err)
 			continue
 		}
@@ -659,9 +655,9 @@ func applyGovernance(file string) error {
 				note("row rule", rr.Name, "create", nil, fmt.Errorf("no tag %q", rr.Tag))
 				continue
 			}
-			body["tagId"] = id
+			body["target"] = map[string]any{"type": "tag", "tagId": id}
 		case rr.Table != "" && project != "":
-			body["projectId"], body["table"] = project, rr.Table
+			body["target"] = map[string]any{"type": "table", "projectId": project, "table": rr.Table}
 		default:
 			note("row rule", rr.Name, "create", nil, fmt.Errorf("a row rule names a table (with a project in context) or a tag"))
 			continue
@@ -714,29 +710,26 @@ func unique(xs []string) []string {
 // otherTarget says how an existing rule's target differs from the file's (a table in the project, or a tag); "" when
 // it is the same.
 func otherTarget(existing record, table, tagID, tagLabel, project string) string {
+	target, _ := existing["target"].(map[string]any)
+	kind := strings.ToLower(str(target["type"]))
 	switch {
 	case tagLabel != "":
-		if str(existing["targetType"]) != "TAG" || str(existing["tagId"]) != tagID {
-			return fmt.Sprintf("the rule is on %s, not on the tag %s", describeTarget(existing), tagLabel)
+		if kind != "tag" || str(target["tagId"]) != tagID {
+			return fmt.Sprintf("the rule is on %s, not on the tag %s", describeTarget(target), tagLabel)
 		}
 	case table != "":
-		sameTable := strings.EqualFold(str(existing["table"]), table) ||
-			strings.EqualFold(str(existing["catalogName"])+"."+str(existing["schemaName"])+"."+str(existing["tableName"]), table)
-		if str(existing["targetType"]) == "TAG" || !sameTable || (project != "" && str(existing["projectId"]) != project) {
-			return fmt.Sprintf("the rule is on %s, not on %s", describeTarget(existing), table)
+		if kind == "tag" || !strings.EqualFold(str(target["table"]), table) || (project != "" && str(target["projectId"]) != project) {
+			return fmt.Sprintf("the rule is on %s, not on %s", describeTarget(target), table)
 		}
 	}
 	return ""
 }
 
-func describeTarget(r record) string {
-	if str(r["targetType"]) == "TAG" {
-		return "the tag " + str(r["tagId"])
+func describeTarget(target map[string]any) string {
+	if strings.EqualFold(str(target["type"]), "tag") {
+		return "the tag " + str(target["tagId"])
 	}
-	if t := str(r["table"]); t != "" {
-		return t + " in project " + str(r["projectId"])
-	}
-	return str(r["catalogName"]) + "." + str(r["schemaName"]) + "." + str(r["tableName"]) + " in project " + str(r["projectId"])
+	return str(target["table"]) + " in project " + str(target["projectId"])
 }
 
 // send writes; under --dry-run the client prints the request instead.

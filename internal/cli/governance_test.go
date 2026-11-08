@@ -8,12 +8,11 @@ import (
 // Codex review round 5, R5-6: a label or name that is two records is refused before anything is sent.
 func TestTwiceNamesAmbiguousRecords(t *testing.T) {
 	idx := index([]record{
-		{"tag": map[string]any{"id": "a", "label": "PHI"}},
-		{"tag": map[string]any{"id": "b", "label": "phi"}},
-		{"tag": map[string]any{"id": "c", "label": "PII"}},
+		{"id": "a", "name": "PHI"},
+		{"id": "b", "name": "phi"},
+		{"id": "c", "name": "PII"},
 	}, func(x record) (string, string) {
-		tag, _ := x["tag"].(map[string]any)
-		return strings.ToUpper(str(tag["label"])), str(tag["id"])
+		return strings.ToUpper(str(x["name"])), str(x["id"])
 	})
 	if got := twice(idx, "PHI", "tag"); len(got) != 1 || !strings.Contains(got[0], "a, b") {
 		t.Fatalf("PHI is two tags: %v", got)
@@ -25,8 +24,8 @@ func TestTwiceNamesAmbiguousRecords(t *testing.T) {
 
 // R5-7: an existing rule named for another target is not updated as if it were the file's.
 func TestOtherTarget(t *testing.T) {
-	onCustomers := record{"targetType": "TABLE", "table": "peaka.table.customers", "projectId": "p1"}
-	onRegion := record{"targetType": "TAG", "tagId": "t-region"}
+	onCustomers := record{"target": map[string]any{"type": "table", "table": "peaka.table.customers", "projectId": "p1"}}
+	onRegion := record{"target": map[string]any{"type": "tag", "tagId": "t-region"}}
 	cases := []struct {
 		name                         string
 		rule                         record
