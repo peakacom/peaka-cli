@@ -24,7 +24,7 @@ func newGovernanceCmd() *cobra.Command {
 	cmd.AddCommand(
 		group("tags", "Classification tags and their masking rules", []string{"tag"},
 			opSpec{Use: "list", Short: "List tags with their masking rules", Method: http.MethodGet, Path: govPath + "/tags",
-				Unwrap: "items", Fields: []string{"id", "name", "active", "maskRules"}},
+				Unwrap: "items", Fields: []string{"id", "key", "name", "parentId", "sensitivity", "status", "kind", "active", "maskRules"}},
 			opSpec{Use: "describe TAG", Aliases: []string{"get"}, Short: "Show a tag", Method: http.MethodGet, Path: govPath + "/tags/{tag}",
 				Args: []argSpec{{Name: "TAG", Resolve: resolveTag}}},
 			opSpec{Use: "create", Short: "Create a tag", Method: http.MethodPost, Path: govPath + "/tags", Body: true,
@@ -38,8 +38,12 @@ func newGovernanceCmd() *cobra.Command {
 					{Name: "description", Help: "what it classifies"},
 					{Name: "active", Kind: "bool", Help: "masks while active", Default: true},
 					{Name: "rule", Kind: "strings", Help: "a masking rule WHO=MASK, in order: everyone, user:ID, group:NAME|ID, role:ID; MASK a mask name or id; repeatable", Set: rulesSetter},
+					{Name: "key", Help: "a stable key (lowercase letters, digits, _ . -); derived from the name when not given; never changes"},
+					{Name: "parent", Help: "the tag above it in the organization's tree: name, key or id", Resolve: resolveParent},
+					{Name: "sensitivity", Help: "PUBLIC, INTERNAL, CONFIDENTIAL or RESTRICTED; the organization's default when not given"},
+					{Name: "kind", Help: "CLASSIFICATION (default) or BUSINESS (no sensitivity)"},
 				},
-				Prepare: resolveRuleNames},
+				Prepare: chain(resolveRuleNames, paramsIntoBody("parent", "parentId"))},
 			opSpec{Use: "update TAG", Short: "Change a tag's name, description, state or rules; what is not given stays (202: waits for approval)", Method: http.MethodPatch,
 				Path: govPath + "/tags/{tag}", Body: true, Args: []argSpec{{Name: "TAG", Resolve: resolveTag}},
 				Flags: []flagSpec{
@@ -47,8 +51,12 @@ func newGovernanceCmd() *cobra.Command {
 					{Name: "description", Help: "what it classifies"},
 					{Name: "active", Kind: "bool", Help: "masks while active"},
 					{Name: "rule", Kind: "strings", Help: "the masking rules WHO=MASK, in order (replaces them); repeatable", Set: rulesSetter},
+					{Name: "parent", Help: "the tag above it: name, key or id; none makes it a root", Resolve: resolveParent},
+					{Name: "sensitivity", Help: "PUBLIC, INTERNAL, CONFIDENTIAL or RESTRICTED; none for the organization's default"},
+					{Name: "status", Help: "ACTIVE, or DEPRECATED (no new assignment; columns that have it keep it)"},
+					{Name: "kind", Help: "CLASSIFICATION or BUSINESS"},
 				},
-				Prepare: resolveRuleNames},
+				Prepare: chain(resolveRuleNames, paramsIntoBody("parent", "parentId"), noneClears("sensitivity"))},
 			opSpec{Use: "delete TAG", Short: "Delete a tag and take it off every column (202: waits for approval)", Method: http.MethodDelete,
 				Path: govPath + "/tags/{tag}", Args: []argSpec{{Name: "TAG", Resolve: resolveTag}}, Confirm: "Delete tag {0} and take it off every column?", Empty: "Deleted."},
 		),
@@ -94,6 +102,28 @@ func newGovernanceCmd() *cobra.Command {
 			opSpec{Use: "remove ID", Short: "Take a tag off a column (202: waits for approval)", Method: http.MethodDelete, Path: govPath + "/column-tags/{id}",
 				Args: []argSpec{{Name: "ID", Param: "id"}}, Empty: "Removed."},
 		),
+		group("table-tags", "Tags on whole tables and schemas: every column below carries them", []string{"scopes"},
+			opSpec{Use: "list", Short: "List the project's table and schema tags", Method: http.MethodGet, Path: govPath + "/table-tags",
+				Prepare: projectIntoQuery, Unwrap: "items", Fields: []string{"id", "tagId", "catalog", "schema", "table", "reason", "createdAt"}},
+			opSpec{Use: "add", Short: "Put a tag on a whole table, or on a whole schema when no table is given (202: may wait for approval)",
+				Method: http.MethodPost, Path: govPath + "/table-tags", Body: true,
+				Long: `Every column of the table (or of every table of the schema) carries the tag, columns added later too. A schema tag
+is for a connected catalog: a Peaka table's schema is its own.
+
+  peaka gov table-tags add --catalog-id 1 --catalog-name peaka --schema table --table patients --tag PHI
+  peaka gov table-tags add --catalog-id 7 --schema hr --tag PII`,
+				Flags: []flagSpec{
+					{Name: "catalog-id", Key: "catalogId", Help: "the catalog's id (1 for Peaka tables)", Required: true},
+					{Name: "catalog-name", Key: "catalog", Help: "the catalog's name in SQL"},
+					{Name: "schema", Key: "schema", Help: "the schema", Required: true},
+					{Name: "table", Key: "table", Help: "the table; the whole schema when not given"},
+					{Name: "tag", Help: "tag name or id", Required: true, Resolve: resolveTag},
+					{Name: "reason", Help: "why"},
+				},
+				Prepare: chain(projectIntoBody, paramsIntoBody("tag", "tagId"))},
+			opSpec{Use: "remove ID", Short: "Take a tag off a whole table or schema (202: may wait for approval)", Method: http.MethodDelete,
+				Path: govPath + "/table-tags/{id}", Args: []argSpec{{Name: "ID", Param: "id"}}, Empty: "Removed."},
+		),
 		group("row-rules", "Row rules: a condition on every read of a table, or of every table with a tagged column", []string{"row-rule", "rules"},
 			opSpec{Use: "list", Short: "List row rules", Method: http.MethodGet, Path: "/organizations/{org}/governance/row-rules",
 				Unwrap: "items", Fields: []string{"id", "name", "target.type", "target.table", "target.tagId", "enabled", "expression"}},
@@ -119,6 +149,13 @@ func newGovernanceCmd() *cobra.Command {
 				Args: []argSpec{{Name: "ID", Param: "id"}}, Confirm: "Delete row rule {0}?", Empty: "Deleted."},
 		),
 		opSpec{Use: "policy", Short: "Show the organization's governance policy", Method: http.MethodGet, Path: govPath + "/policy"}.command(),
+		opSpec{Use: "impact", Short: "What turning classification enforcement on would change (-f projectId=… for one project)",
+			Long: `Read from metadata alone: untagged columns per table, tables refused for having classified columns and no row rule,
+classifications that cannot be read, materialized queries that would be refused, declassifications that lift every path.
+
+  peaka gov impact
+  peaka gov impact -f projectId=OtnUT0en`,
+			Method: http.MethodGet, Path: govPath + "/enforcement-impact", Query: true}.command(),
 		group("audit", "The organization's audit log", nil,
 			opSpec{Use: "events", Short: "Classification changes, newest first (-f kind=TAG_APPLIED,ROW_RULE_CREATED -f since=… -f cursor=…)",
 				Method: http.MethodGet, Path: govPath + "/audit-events", Query: true, Unwrap: "items",
@@ -252,6 +289,30 @@ func resolveTag(r *Runtime, ref string, params map[string]string) error {
 	}
 	params["tag"] = str(t["id"])
 	return nil
+}
+
+// resolveParent: a tag's parent by name, key or id; "none" makes it a root (an empty parentId).
+func resolveParent(r *Runtime, ref string, params map[string]string) error {
+	if strings.EqualFold(strings.TrimSpace(ref), "none") {
+		params["parent"] = ""
+		return nil
+	}
+	found := map[string]string{}
+	if err := resolveTag(r, ref, found); err != nil {
+		return err
+	}
+	params["parent"] = found["tag"]
+	return nil
+}
+
+// noneClears: "none" for a field sends an empty value, which clears it.
+func noneClears(field string) func(*callCtx) error {
+	return func(c *callCtx) error {
+		if v, ok := c.Body[field].(string); ok && strings.EqualFold(strings.TrimSpace(v), "none") {
+			c.Body[field] = ""
+		}
+		return nil
+	}
 }
 
 // masksForMatch: masks by id, name or a predefined mask's key.

@@ -97,3 +97,15 @@ func TestListAtRefusesMoreWithoutACursor(t *testing.T) {
 		t.Fatal("a list that says there is more with no cursor is not the whole list")
 	}
 }
+
+// DEV-4344: a tag is found by its stable key as by its id.
+func TestATagIsFoundByItsKey(t *testing.T) {
+	tags := []record{{"id": "a1", "name": "Protected Health", "key": "phi"}, {"id": "b2", "name": "PII", "key": "pii"}}
+	got, err := matchOne(tags, "PHI", "tag")
+	if err != nil || str(got["id"]) != "a1" {
+		t.Fatalf("by key: got %v, %v", got, err)
+	}
+	if got, _ := matchOne(tags, "b2", "tag"); str(got["id"]) != "b2" {
+		t.Fatalf("by id: got %v", got)
+	}
+}

@@ -45,6 +45,12 @@ func matchOne(rs []record, ref, what string) (record, error) {
 			return r, nil
 		}
 	}
+	// A stable key (a tag's, DEV-4344) is unique as the id is.
+	for _, r := range rs {
+		if k := str(r["key"]); k != "" && k == strings.ToLower(strings.TrimSpace(ref)) {
+			return r, nil
+		}
+	}
 	var hits []record
 	for _, r := range rs {
 		if strings.EqualFold(str(r["name"]), ref) || strings.EqualFold(str(r["displayName"]), ref) {
