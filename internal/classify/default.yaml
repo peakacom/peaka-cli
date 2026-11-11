@@ -1,0 +1,267 @@
+# The built-in classification template (schema peaka.classify.template/v1).
+# Copy it with `peaka classify template > my-template.yaml`, change what you need, and pass it with
+# --template or `peaka config set classifier-template my-template.yaml`. A file that says `extends: default`
+# only has to list what it adds, replaces (same label id) or disables.
+name: default
+version: 1
+description: Personal (PII), quasi-identifying and health (PHI) data; financial identifiers are off by default.
+settings:
+  rule_min_samples: 20   # non-null sampled values a rule needs before it decides without the model
+  model_accept: 0.90     # model confidence that accepts a label
+  model_review: 0.60     # below accept but at least this: the label is kept for review
+  none_gate: 0.50        # p(personal) below this: the column is not personal data
+  phi_gate: 0.75         # p(health) at or above this flags the column as PHI
+# Shortcuts settle a column as `none` from its metadata alone (name, catalog, data type, the connector's
+# primary-key and system flags), at every evidence level and without the model. Every condition listed must
+# hold; a column whose name matches a label's name hint is never shortcut. An extending template replaces a
+# shortcut of the same id (enabled: false turns it off) and appends its own, e.g. the audit columns of its
+# own schemas: {id: audit, name: '^(created|updated|deleted)_(at|by|on)$'}.
+shortcuts:
+  - id: system_column
+    title: Column the connector marks as a system column
+    system: true
+  - id: peaka_housekeeping
+    title: The housekeeping columns of Peaka's own tables
+    catalog: '^peaka$'
+    name: '^_(id|version|session|created_time|created_by|last_modified_time|last_modified_by)$'
+  - id: boolean
+    title: Boolean flag
+    types: [boolean]
+  - id: primary_key
+    title: Integer primary key
+    primary_key: true
+    types: [number]
+    name: '^(id|pk|.*_id|.*_pk)$'
+groups:
+  pii:
+    title: Direct identifiers
+    description: Values that identify a specific person on their own.
+    labels:
+      full_name:
+        title: Person name
+        sensitivity: high
+        description: A person's full, first or last name.
+        types: [string]
+        name_hints: ['^(full_?|first_?|last_?|sur|given_?|family_?|middle_?)?name$', 'customer_?name', 'patient_?name', 'contact_?name', 'display_?name']
+      email:
+        title: Email address
+        sensitivity: high
+        description: A personal email address.
+        types: [string]
+        name_hints: ['e_?mail']
+        rules:
+          - {type: validator, id: email, min_fraction: 0.9}
+      phone:
+        title: Phone number
+        sensitivity: high
+        description: A telephone, mobile or fax number.
+        types: [string, number]
+        name_hints: ['phone|mobile|msisdn|^tel$|telephone|fax|gsm']
+        rules:
+          - {type: validator, id: e164_phone, min_fraction: 0.9}
+      national_id:
+        title: National ID number
+        sensitivity: high
+        description: A government-issued personal identity number (SSN, TCKN, NHS number, etc).
+        types: [string, number]
+        name_hints: ['ssn|social_?security|national_?id|tckn|tc_?kimlik|kimlik|nhs_?(no|number)|citizen|identity_?(no|number)']
+        rules:
+          - {type: validator, id: us_ssn, min_fraction: 0.95}
+          - {type: validator, id: tr_tckn, min_fraction: 0.95}
+          - {type: validator, id: uk_nhs, min_fraction: 0.95}
+      passport:
+        title: Passport number
+        sensitivity: high
+        description: A passport or travel document number.
+        types: [string]
+        name_hints: ['passport']
+      date_of_birth:
+        title: Date of birth
+        sensitivity: high
+        description: A person's birth date.
+        types: [date, string, number]
+        name_hints: ['dob|birth_?(date|day)|date_?of_?birth|born']
+      street_address:
+        title: Street address
+        sensitivity: high
+        description: A street-level postal address or address line.
+        types: [string]
+        name_hints: ['address|addr_?line|street']
+      ip_address:
+        title: IP address
+        sensitivity: medium
+        description: An IPv4 or IPv6 network address.
+        types: [string]
+        name_hints: ['ip_?addr|client_?ip|remote_?ip|^ip$']
+        rules:
+          - {type: validator, id: ip, min_fraction: 0.95}
+      device_id:
+        title: Device identifier
+        sensitivity: medium
+        description: A hardware or advertising device identifier (IMEI, MAC address, IDFA, GAID).
+        types: [string]
+        name_hints: ['imei|mac_?addr|idfa|gaid|device_?id|advertising_?id']
+        rules:
+          - {type: regex, pattern: '^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$', min_fraction: 0.95}
+      username:
+        title: Username or handle
+        sensitivity: medium
+        description: A login name or social media handle of a person.
+        types: [string]
+        name_hints: ['user_?name|login|handle|screen_?name|nick_?name']
+      biometric:
+        title: Photo or biometric
+        sensitivity: high
+        description: A face photo, fingerprint, voiceprint or other biometric data, or a link to it.
+        types: [string, binary]
+        name_hints: ['photo|avatar|selfie|fingerprint|face_?(id|embedding)|biometric|picture']
+      geolocation:
+        title: Precise geolocation
+        sensitivity: high
+        description: Latitude, longitude or GPS coordinates of a person.
+        types: [number, string]
+        name_hints: ['^lat(itude)?$|^lon(gitude)?$|^lng$|geo|coordinates|location']
+  pii_quasi:
+    title: Quasi-identifiers
+    description: Attributes that identify a person only in combination with others.
+    labels:
+      postal_code:
+        title: Postal code
+        sensitivity: low
+        description: A ZIP or postal code.
+        types: [string, number]
+        name_hints: ['zip|postal|post_?code']
+      city_region:
+        title: City or region
+        sensitivity: low
+        description: The city, state, province or country of a person.
+        types: [string]
+        name_hints: ['city|town|state|province|region|country']
+      gender:
+        title: Gender
+        sensitivity: medium
+        description: A person's gender or sex.
+        types: [string, number, boolean]
+        name_hints: ['gender|^sex$']
+      age:
+        title: Age
+        sensitivity: medium
+        description: A person's age in years or an age band.
+        types: [number, string]
+        name_hints: ['^age$|age_?(group|band|range)']
+      job_title:
+        title: Job title or employer
+        sensitivity: low
+        description: A person's occupation, job title or employer name.
+        types: [string]
+        name_hints: ['job|^title$|occupation|employer|position|profession']
+      ethnicity_religion:
+        title: Special category
+        sensitivity: high
+        description: Race, ethnicity, religion, political opinion, union membership or sexual orientation.
+        types: [string]
+        name_hints: ['ethnic|race|religion|nationality|sexual_?orient|political|union']
+  phi:
+    title: Protected health information
+    description: Health, treatment or health-payment data linked to an individual.
+    labels:
+      mrn:
+        title: Medical record number
+        sensitivity: high
+        description: A patient or medical record identifier assigned by a provider.
+        types: [string, number]
+        name_hints: ['mrn|medical_?record|patient_?(id|no|num|number)']
+      diagnosis:
+        title: Diagnosis or condition
+        sensitivity: high
+        description: A medical diagnosis, condition or ICD code.
+        types: [string]
+        name_hints: ['diagnos|icd|condition|disease|^dx']
+        rules:
+          - {type: regex, pattern: '^[A-TV-Z][0-9][0-9AB](\.[0-9A-Z]{1,4})?$', min_fraction: 0.8}
+      medication:
+        title: Medication or prescription
+        sensitivity: high
+        description: A drug name, prescription, dosage or NDC/RxNorm code.
+        types: [string]
+        name_hints: ['medic|drug|prescri|^rx|ndc|dosage']
+      procedure:
+        title: Medical procedure
+        sensitivity: high
+        description: A medical procedure, treatment or CPT/HCPCS code.
+        types: [string]
+        name_hints: ['procedure|treatment|cpt|hcpcs|surgery']
+      lab_result:
+        title: Lab or vital result
+        sensitivity: high
+        description: A laboratory test result, vital sign or clinical measurement of a patient.
+        types: [string, number]
+        name_hints: ['^lab|_lab|result|hba1c|glucose|^bp$|blood|vital|loinc']
+      insurance_member_id:
+        title: Health insurance member ID
+        sensitivity: high
+        description: A health plan member, policy or subscriber number.
+        types: [string, number]
+        name_hints: ['member_?id|policy_?(no|number)|subscriber|insurance_?id|payer']
+      provider_npi:
+        title: Provider NPI
+        sensitivity: medium
+        description: A healthcare provider identifier such as a US NPI.
+        types: [string, number]
+        name_hints: ['npi|provider_?id|physician_?id|doctor_?id']
+        rules:
+          - {type: validator, id: luhn, min_fraction: 0.95, decide: false}
+      clinical_notes:
+        title: Clinical free text
+        sensitivity: high
+        description: Free-text clinical notes, encounter summaries or discharge text about a patient.
+        types: [string]
+        name_hints: ['note|narrative|summary|complaint|history|soap']
+      encounter_date:
+        title: Service or admission date
+        sensitivity: medium
+        description: A date of medical service, admission or discharge.
+        types: [date, string]
+        name_hints: ['admi(t|ssion)|discharge|encounter|visit_?date|service_?date']
+  financial:
+    title: Financial identifiers
+    description: Payment card, bank account and tax identifiers.
+    enabled: false
+    labels:
+      card_number:
+        title: Payment card number
+        sensitivity: high
+        description: A credit or debit card number (PAN).
+        types: [string, number]
+        name_hints: ['card_?(no|num|number)|^pan$|cc_?num|credit_?card']
+        rules:
+          - {type: validator, id: luhn, min_fraction: 0.95}
+          - {type: regex, pattern: '^[0-9 -]{13,23}$', min_fraction: 0.95, decide: false}
+      iban:
+        title: IBAN
+        sensitivity: high
+        description: An international bank account number.
+        types: [string]
+        name_hints: ['iban']
+        rules:
+          - {type: validator, id: iban_mod97, min_fraction: 0.95}
+      bank_account:
+        title: Bank account or routing number
+        sensitivity: high
+        description: A domestic bank account, sort code, routing number or BIC.
+        types: [string, number]
+        name_hints: ['account_?(no|num|number)|routing|sort_?code|bic|swift']
+      tax_id:
+        title: Tax identifier
+        sensitivity: high
+        description: A personal or business tax identification number (TIN, EIN, VAT, Steuer-ID, vergi no).
+        types: [string, number]
+        name_hints: ['tax_?id|^tin$|^ein$|vat|steuer|vergi']
+  none:
+    title: Not personal
+    description: Technical, business or aggregate data with no personal content.
+    labels:
+      none:
+        title: Not personal data
+        sensitivity: low
+        description: Surrogate keys, timestamps, amounts, statuses, product or configuration data that is not about an individual.

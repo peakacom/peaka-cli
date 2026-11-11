@@ -53,7 +53,7 @@ Claude Desktop / Cursor (mcpServers): {"peaka": {"command": "peaka", "args": ["m
 
 Tools: peaka_run (any command line), peaka_sql, and one tool per common
 operation (list/describe/create for catalogs, tables, queries, caches,
-metadata, connections, semantic catalogs). Resources: the agent guide and the
+metadata, connections, semantic catalogs; peaka_classify for PII/PHI). Resources: the agent guide and the
 Trino SQL rule set.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -269,6 +269,14 @@ func mcpTools() []mcpTool {
 		{Name: "peaka_search", Description: "Find catalogs, schemas and tables whose name contains a term.",
 			Params: []mcpParam{{Name: "term", Description: "search term", Required: true}, projectParam},
 			Args:   func(a map[string]any) []string { return []string{"catalogs", "search", sarg(a, "term")} }},
+		{Name: "peaka_classify", Description: "Classify the columns of a catalog, schema or table as PII/PHI with rules and the Jev model. Returns a report: per column a label, group, sensitivity, phi flag, confidence and status (accepted or review). evidence 'shape' (default) sends value layouts only; 'samples' sends up to 10 values per column and needs confirmSamples.",
+			Params: []mcpParam{{Name: "target", Description: "catalog, catalog.schema or catalog.schema.table", Required: true},
+				{Name: "evidence", Description: "names, shape or samples"}, {Name: "template", Description: "template file path"},
+				{Name: "failOn", Description: "label ids, group ids, phi, review or any (comma-separated); a match fails the call"},
+				{Name: "confirmSamples", Description: "allow sending sample values (evidence samples)", Type: "boolean"}, projectParam},
+			Args: func(a map[string]any) []string {
+				return cat([]string{"classify", sarg(a, "target"), "--no-progress"}, opt(a, "evidence", "--evidence"), opt(a, "template", "--template"), opt(a, "failOn", "--fail-on"), optBool(a, "confirmSamples", "--yes"))
+			}},
 		{Name: "peaka_list_queries", Description: "List saved queries.", Params: []mcpParam{projectParam},
 			Args: func(a map[string]any) []string { return []string{"queries", "list"} }},
 		{Name: "peaka_get_query", Description: "Show a saved query (SQL, type, schedule, path).", Params: []mcpParam{query, projectParam},

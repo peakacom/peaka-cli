@@ -38,6 +38,7 @@ peaka queries execute won_deals --format csv
 peaka folders tree --queries
 peaka metadata refresh --catalog hubspot --wait
 peaka metadata update hubspot.crm.deals --description "Open and closed deals" --use-with-ai
+peaka classify hubspot.crm --out report.json          # which columns hold PII or PHI
 peaka ai chat "How many deals closed last month?"
 peaka tables create leads && peaka tables add-column leads email --type text
 peaka tables import leads --file leads.csv
@@ -187,10 +188,22 @@ preset > default. `peaka config list` shows each value with its source.
 | org | `PEAKA_ORG` | `--org` |
 | project | `PEAKA_PROJECT` | `--project`, `-p` |
 | format | `PEAKA_FORMAT` | `--format`, `-o` |
+| classifier-url | `PEAKA_CLASSIFIER_URL` | — |
+| classifier-model | `PEAKA_CLASSIFIER_MODEL` | — |
+| classifier-template | `PEAKA_CLASSIFIER_TEMPLATE` | — |
+| classifier-key | `PEAKA_CLASSIFIER_API_KEY` | — |
 
 `PEAKA_API_KEY` bypasses stored accounts. `PEAKA_CONFIGURATION` selects the
 configuration. Secrets go to the OS keychain, or to `credentials.json` (0600)
 when there is none or `PEAKA_CREDENTIALS_STORE=file`.
+
+The `classifier-*` properties address the model behind `peaka classify`:
+`classifier-url` defaults to `https://api.typesafe.ai/v1/systemone`,
+`classifier-model` to `jev-latest`, and `classifier-template` is a
+classification template file (unset = the built-in one; see Classification). `classifier-key` is a secret:
+`peaka config set classifier-key VALUE` keeps it in the keychain (or
+`credentials.json`), never in the yaml, `config get`/`list` show it masked, and
+`PEAKA_CLASSIFIER_API_KEY` overrides it.
 
 ## Login
 
@@ -222,6 +235,81 @@ last an hour and are refreshed silently; the refresh token lasts months.
 the request a writing command would send; `--if-not-exists` makes a create
 succeed when the thing exists.
 
+## Classification
+
+`peaka classify` finds the columns that hold personal (PII) or health (PHI)
+data, so they can be reviewed before a catalog is shared, exposed to the AI
+agent or covered by a policy:
+
+```
+peaka classify hubspot.crm --out report.json                 # a catalog.schema; also a catalog, or one table
+peaka classify postgres.public.patients --evidence samples --yes
+peaka classify postgres --evidence names --fail-on phi,review   # CI: exit 8 when such a column exists
+peaka classify postgres.public --dry-run                     # the requests that would go out, and a cost estimate
+```
+
+Every column goes through the template's rules first: checksums and patterns
+over sampled values (Luhn, IBAN, email, IP, SSN, TCKN, NHS numbers, …) and
+column-name hints. What the rules leave open goes to a System One model —
+TypeSafe's [Jev](https://docs.typesafe.ai), or any server with the same API
+(`classifier-url`, `classifier-model`; the key in `PEAKA_CLASSIFIER_API_KEY` or
+`peaka config set classifier-key` — only TypeSafe's endpoint insists on one, a
+local server such as `--endpoint http://localhost:8009/v1/systemone --model
+kev-9b` is asked without). The model returns a label with its
+probability, plus two yes/no gates ("about a person?", "health information in
+this table's context?"); a column is `accepted` above the template's
+`model_accept`, `review` below it, and `phi` is flagged independently of the
+label (a birth date in a patients table is PII *and* PHI).
+
+`--evidence` decides what leaves the machine. `names` sends column names, types
+and descriptions only. `shape`, the default, also sends the layout of sampled
+values (`555-12-3456` becomes `ddd-dd-dddd`) with length, null and distinct
+statistics, never a value. `samples` also sends up to ten values per column
+and asks for confirmation (`--yes`). The sample is one query per table
+(`--samples` rows), through the REST query execution (`--sample-via api`, the
+default, any identity) or the Trino endpoint (`--sample-via sql`). Jev is hosted by TypeSafe in the US; check
+their data-processing terms before using `samples` on regulated data.
+
+The labels come from a template. `peaka classify template > acme.yaml` prints
+the built-in one (groups `pii`, `pii_quasi`, `phi`, `financial` — off by
+default — and `none`); a file that says `extends: default` adds, replaces or
+disables labels and is passed with `--template` or `classifier-template`:
+
+```yaml
+name: acme-tr
+version: 1
+extends: default
+groups:
+  pii:
+    labels:
+      tr_tckn:
+        title: TC Kimlik No
+        sensitivity: high
+        description: An 11-digit Turkish national identity number.
+        name_hints: ['tckn|kimlik']
+        rules: [{type: validator, id: tr_tckn, min_fraction: 0.95}]
+  financial: {enabled: true}
+disable: [username]
+shortcuts:
+  - {id: audit, name: '^(created|updated|deleted)_(at|by|on)$'}
+```
+
+Shortcuts are the template's list of columns that are `none` by their metadata
+alone and never reach the model: the built-in ones cover columns the connector
+marks as system or primary key, booleans and the housekeeping columns of
+Peaka's own tables. A template adds its own (conditions on the column name, the
+catalog, the data type, the key and system flags; all must hold) or turns a
+built-in one off with `enabled: false`. A column whose name matches a label's
+name hint is never shortcut.
+
+The report (`--out`, or stdout with `--format json`) is versioned
+(`peaka.classify.report/v1`) and carries, per column, the label, group,
+sensitivity, `phi`, confidence, method (`rule`, `shortcut` or `model`), the
+evidence it was based on and the model's probabilities; the header records the
+template fingerprint and the exact model version that answered. Exit codes:
+8 when `--fail-on` matches or a table could not be read (the report is still
+written), 3 when the model refuses the key, 9 when it stayed unavailable.
+
 ## MCP
 
 `peaka mcp serve` exposes the CLI as Model Context Protocol tools over stdio,
@@ -233,7 +321,7 @@ claude mcp add peaka -- peaka mcp serve --project <id>
 
 Tools: `peaka_sql`, `peaka_run` (any command line), and one tool per common
 operation (catalogs, schemas, tables, columns, queries, caches, metadata,
-connections, semantic catalogs, exports). Resources: `peaka://guide` and
+connections, semantic catalogs, exports, `peaka_classify`). Resources: `peaka://guide` and
 `peaka://sql-rules`.
 
 ## Skill

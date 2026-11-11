@@ -21,6 +21,10 @@ type Settings struct {
 	Color         string
 	Pager         string
 
+	ClassifierURL      string
+	ClassifierModel    string
+	ClassifierTemplate string // "" = the built-in template
+
 	// Source says where each property came from: flag, env, config, preset, default.
 	Source map[string]string
 }
@@ -28,7 +32,14 @@ type Settings struct {
 // Overrides are the values given on the command line ("" = not given).
 type Overrides struct {
 	Environment, API, DBC, OAuth, Studio, Account, Org, Project, Format string
+	ClassifierURL, ClassifierModel, ClassifierTemplate                  string
 }
+
+// Classifier defaults, applied when nothing else sets them.
+const (
+	DefaultClassifierURL   = "https://api.typesafe.ai/v1/systemone"
+	DefaultClassifierModel = "jev-latest"
+)
 
 // envVar maps a property to its environment variable.
 var envVar = map[string]string{
@@ -43,6 +54,10 @@ var envVar = map[string]string{
 	"format":      "PEAKA_FORMAT",
 	"color":       "PEAKA_COLOR",
 	"pager":       "PEAKA_PAGER",
+
+	"classifier-url":      "PEAKA_CLASSIFIER_URL",
+	"classifier-model":    "PEAKA_CLASSIFIER_MODEL",
+	"classifier-template": "PEAKA_CLASSIFIER_TEMPLATE",
 }
 
 // Resolve applies flag > env > configuration > preset > default for every property.
@@ -93,6 +108,16 @@ func Resolve(c *Configuration, o Overrides) *Settings {
 		s.Color, s.Source["color"] = "auto", "default"
 	}
 	s.Pager = pick("pager", "")
+	s.ClassifierURL = pick("classifier-url", o.ClassifierURL)
+	if s.ClassifierURL == "" {
+		s.ClassifierURL, s.Source["classifier-url"] = DefaultClassifierURL, "default"
+	}
+	s.ClassifierModel = pick("classifier-model", o.ClassifierModel)
+	if s.ClassifierModel == "" {
+		s.ClassifierModel, s.Source["classifier-model"] = DefaultClassifierModel, "default"
+	}
+	s.ClassifierTemplate = pick("classifier-template", o.ClassifierTemplate)
+	// classifier-key is not resolved here: it is a secret, see ClassifierKey.
 	return s
 }
 
@@ -105,10 +130,12 @@ func (s *Settings) APIHost() string {
 	return u.Host
 }
 
-// Values returns the properties as a map (for `config list`).
+// Values returns the properties as a map (for `config list`); classifier-key is
+// left out, the CLI adds it masked.
 func (s *Settings) Values() map[string]string {
 	return map[string]string{
 		"environment": s.Environment, "api": s.API, "dbc": s.DBC, "oauth": s.OAuth, "studio": s.Studio, "account": s.Account,
 		"org": s.Org, "project": s.Project, "format": s.Format, "color": s.Color, "pager": s.Pager,
+		"classifier-url": s.ClassifierURL, "classifier-model": s.ClassifierModel, "classifier-template": s.ClassifierTemplate,
 	}
 }

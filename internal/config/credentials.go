@@ -139,6 +139,27 @@ func Secret(a Account) (string, error) {
 	return loadSecret(a.key())
 }
 
+// --- classifier key: a per-configuration secret, kept out of the yaml ---
+
+func classifierKeyName(configuration string) string { return "classifier-key/" + configuration }
+
+// SetClassifierKey stores the classifier API key of a configuration in the keychain (or credentials.json); "" deletes it.
+func SetClassifierKey(configuration, key string) error {
+	if key == "" {
+		return deleteSecret(classifierKeyName(configuration))
+	}
+	return storeSecret(classifierKeyName(configuration), key)
+}
+
+// ClassifierKey returns the classifier API key: $PEAKA_CLASSIFIER_API_KEY, else the stored one.
+// source is "env", "keychain" or "file", or "" when there is none; a missing key is not an error.
+func ClassifierKey(configuration string) (key, source string, err error) {
+	if k := os.Getenv("PEAKA_CLASSIFIER_API_KEY"); k != "" {
+		return k, "env", nil
+	}
+	return loadSecretFrom(classifierKeyName(configuration))
+}
+
 // --- secret storage: keychain first, credentials.json as the fallback ---
 
 func useFileStore() bool { return os.Getenv("PEAKA_CREDENTIALS_STORE") == "file" }
@@ -154,12 +175,7 @@ func storeSecret(key, secret string) error {
 }
 
 func loadSecret(key string) (string, error) {
-	if !useFileStore() {
-		if s, err := keyring.Get(keyringService, key); err == nil && s != "" {
-			return s, nil
-		}
-	}
-	s, err := fileSecretGet(key)
+	s, _, err := loadSecretFrom(key)
 	if err != nil {
 		return "", err
 	}
@@ -167,6 +183,20 @@ func loadSecret(key string) (string, error) {
 		return "", fmt.Errorf("no stored secret for %s (peaka auth login)", key)
 	}
 	return s, nil
+}
+
+// loadSecretFrom reads a secret and says which store had it: "keychain" or "file", "" when neither.
+func loadSecretFrom(key string) (secret, store string, err error) {
+	if !useFileStore() {
+		if s, err := keyring.Get(keyringService, key); err == nil && s != "" {
+			return s, "keychain", nil
+		}
+	}
+	s, err := fileSecretGet(key)
+	if err != nil || s == "" {
+		return "", "", err
+	}
+	return s, "file", nil
 }
 
 func deleteSecret(key string) error {

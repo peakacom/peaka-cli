@@ -26,6 +26,14 @@ Precedence: flag > environment variable > configuration > preset > default`,
 			Short: "Set a property in the active configuration",
 			Args:  cobra.ExactArgs(2),
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if args[0] == "classifier-key" {
+					// the secret goes to the keychain, never to the yaml
+					if err := config.SetClassifierKey(rt.Config.Name, args[1]); err != nil {
+						return err
+					}
+					rt.note("Updated property [%s] in configuration %s", args[0], rt.Config.Name)
+					return nil
+				}
 				if err := rt.Config.Set(args[0], args[1]); err != nil {
 					return api.Exit(api.ExitUsage, "%v", err)
 				}
@@ -41,7 +49,10 @@ Precedence: flag > environment variable > configuration > preset > default`,
 			Short: "Print a property's effective value",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
-				v, ok := rt.Settings.Values()[args[0]]
+				v, src, ok, err := effectiveValue(args[0])
+				if err != nil {
+					return err
+				}
 				if !ok {
 					return api.Exit(api.ExitUsage, "unknown property %q: one of %s", args[0], strings.Join(config.Properties, ", "))
 				}
@@ -49,7 +60,7 @@ Precedence: flag > environment variable > configuration > preset > default`,
 					fmt.Fprintln(rt.Out, v)
 					return nil
 				}
-				return rt.print(map[string]any{"property": args[0], "value": v, "source": rt.Settings.Source[args[0]]})
+				return rt.print(map[string]any{"property": args[0], "value": v, "source": src})
 			},
 		},
 		&cobra.Command{
@@ -57,6 +68,13 @@ Precedence: flag > environment variable > configuration > preset > default`,
 			Short: "Remove a property from the active configuration",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if args[0] == "classifier-key" {
+					if err := config.SetClassifierKey(rt.Config.Name, ""); err != nil {
+						return err
+					}
+					rt.note("Unset property [%s] in configuration %s", args[0], rt.Config.Name)
+					return nil
+				}
 				if err := rt.Config.Set(args[0], ""); err != nil {
 					return api.Exit(api.ExitUsage, "%v", err)
 				}
@@ -72,14 +90,16 @@ Precedence: flag > environment variable > configuration > preset > default`,
 			Short: "Show every effective value and where it comes from",
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				vals := rt.Settings.Values()
 				rows := make([]map[string]any, 0, len(config.Properties))
 				for _, p := range config.Properties {
-					src := rt.Settings.Source[p]
-					if vals[p] == "" {
+					v, src, _, err := effectiveValue(p)
+					if err != nil {
+						return err
+					}
+					if v == "" {
 						src = ""
 					}
-					rows = append(rows, map[string]any{"property": p, "value": vals[p], "source": src})
+					rows = append(rows, map[string]any{"property": p, "value": v, "source": src})
 				}
 				rt.note("configuration: %s", rt.Config.Name)
 				return rt.printWith(rows, "property", "value", "source")
@@ -88,6 +108,17 @@ Precedence: flag > environment variable > configuration > preset > default`,
 		newConfigurationsCmd(),
 	)
 	return cmd
+}
+
+// effectiveValue is a property's resolved value and source; classifier-key comes
+// from the keychain (or the environment) and is shown masked, never raw.
+func effectiveValue(property string) (value, source string, ok bool, err error) {
+	if property == "classifier-key" {
+		key, src, err := config.ClassifierKey(rt.Config.Name)
+		return config.MaskSecret(key), src, true, err
+	}
+	v, ok := rt.Settings.Values()[property]
+	return v, rt.Settings.Source[property], ok, nil
 }
 
 func newConfigurationsCmd() *cobra.Command {

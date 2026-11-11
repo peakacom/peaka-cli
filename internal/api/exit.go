@@ -40,6 +40,7 @@ var exitByCode = map[string]int{
 	"IMPERSONATION_ENDED":     ExitAuth,
 	"INVALID_CREDENTIALS":     ExitAuth,
 	"ACCOUNT_NOT_VERIFIED":    ExitAuth,
+	"CLASSIFIER_AUTH":         ExitAuth,
 
 	"NOT_FOUND":       ExitNotFound,
 	"ROUTE_NOT_FOUND": ExitNotFound,
@@ -61,6 +62,7 @@ var exitByCode = map[string]int{
 	"STATEMENT_NEEDS_SESSION": ExitInvalid,
 	"SEMANTIC_REFUSAL":        ExitInvalid,
 	"TABLE_NOT_CACHEABLE":     ExitInvalid,
+	"CLASSIFIER_INVALID":      ExitInvalid,
 
 	"CONFLICT":                     ExitConflict,
 	"EMAIL_ALREADY_REGISTERED":     ExitConflict,
@@ -75,10 +77,12 @@ var exitByCode = map[string]int{
 	"CONNECTOR_FAILED":    ExitFailed,
 	"AI_NO_SQL_GENERATED": ExitFailed,
 	"AI_RETRY_LIMIT":      ExitFailed,
+	"CLASSIFIER_FAILED":   ExitFailed,
 
-	"PLAN_LIMIT_REACHED":   ExitRetryable,
-	"RATE_LIMITED":         ExitRetryable,
-	"UPSTREAM_UNAVAILABLE": ExitRetryable,
+	"PLAN_LIMIT_REACHED":     ExitRetryable,
+	"RATE_LIMITED":           ExitRetryable,
+	"UPSTREAM_UNAVAILABLE":   ExitRetryable,
+	"CLASSIFIER_UNAVAILABLE": ExitRetryable,
 
 	"INTERNAL_ERROR": ExitFailure,
 }

@@ -29,10 +29,15 @@ type Configuration struct {
 	Format      string `yaml:"format,omitempty"`
 	Color       string `yaml:"color,omitempty"`
 	Pager       string `yaml:"pager,omitempty"`
+
+	ClassifierURL      string `yaml:"classifier-url,omitempty"`
+	ClassifierModel    string `yaml:"classifier-model,omitempty"`
+	ClassifierTemplate string `yaml:"classifier-template,omitempty"`
+	// classifier-key is a secret: it lives in the keychain (SetClassifierKey), never in this file.
 }
 
 // Properties lists every settable key, in display order.
-var Properties = []string{"environment", "api", "dbc", "oauth", "studio", "account", "org", "project", "format", "color", "pager"}
+var Properties = []string{"environment", "api", "dbc", "oauth", "studio", "account", "org", "project", "format", "color", "pager", "classifier-url", "classifier-model", "classifier-template", "classifier-key"}
 
 const DefaultName = "default"
 
@@ -189,6 +194,14 @@ func (c *Configuration) Get(key string) (string, error) {
 		return c.Color, nil
 	case "pager":
 		return c.Pager, nil
+	case "classifier-url":
+		return c.ClassifierURL, nil
+	case "classifier-model":
+		return c.ClassifierModel, nil
+	case "classifier-template":
+		return c.ClassifierTemplate, nil
+	case "classifier-key":
+		return "", nil // a secret; ClassifierKey reads it
 	}
 	return "", unknownProperty(key)
 }
@@ -203,7 +216,7 @@ func (c *Configuration) Set(key, value string) error {
 			}
 		}
 		c.Environment = value
-	case "api", "dbc", "oauth", "studio":
+	case "api", "dbc", "oauth", "studio", "classifier-url":
 		if value != "" && !strings.HasPrefix(value, "http://") && !strings.HasPrefix(value, "https://") {
 			return fmt.Errorf("%s: a URL starting with https:// (or http:// for local use)", key)
 		}
@@ -214,6 +227,8 @@ func (c *Configuration) Set(key, value string) error {
 			c.OAuth = value
 		} else if key == "api" {
 			c.API = value
+		} else if key == "classifier-url" {
+			c.ClassifierURL = value
 		} else {
 			c.DBC = value
 		}
@@ -235,6 +250,12 @@ func (c *Configuration) Set(key, value string) error {
 		c.Color = value
 	case "pager":
 		c.Pager = value
+	case "classifier-model":
+		c.ClassifierModel = value
+	case "classifier-template":
+		c.ClassifierTemplate = value
+	case "classifier-key":
+		return fmt.Errorf("classifier-key is stored in the keychain, not the configuration file")
 	default:
 		return unknownProperty(key)
 	}

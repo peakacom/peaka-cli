@@ -4,7 +4,7 @@
 Verbs: `list`, `describe`, `create`, `update`, `delete`, `use`, plus resource-specific ones.
 Resources: `orgs`, `workspaces`, `projects`, `api-keys`, `connections` (+ `types`), `catalogs`, `schemas`,
 `tables`, `cache`, `queries`, `folders`, `exports`, `semantic-catalogs`, `parametric-tables`, `metadata`
-(+ `relations`, `golden-sqls`, `categorical`, `callback`), `ai`, `drivers`, `embed`, `sql`, `api`.
+(+ `relations`, `golden-sqls`, `categorical`, `callback`), `classify`, `ai`, `drivers`, `embed`, `sql`, `api`.
 `peaka help --format json` lists the full tree with every flag; `peaka <resource> --help` the verbs.
 References: tables are `catalog.schema.table`; catalogs, connections, queries and folders accept an id or a name
 (folders also a path like `/analytics`); an ambiguous name is exit 6 listing the ids.
@@ -16,6 +16,9 @@ SQL: `peaka sql "STATEMENT"` runs Trino SQL on the project in context; `--format
 (quote reserved words: `peaka."table".customers`). `SHOW CATALOGS`, `SHOW SCHEMAS FROM c`,
 `SHOW TABLES FROM c.s`, `DESCRIBE c.s.t` discover the data. A failed query is exit 8 with
 `code: QUERY_FAILED` and `params.errorName`, `params.line`, `params.column` when known.
+Classification: `peaka classify catalog[.schema[.table]]` labels columns as PII/PHI (rules + the Jev model, key in
+`PEAKA_CLASSIFIER_API_KEY`); `--evidence shape` (default) sends value layouts, `--evidence samples` sends values and
+needs `--yes`; read `status` (`accepted`/`review`) and `phi` per column; `--fail-on phi,review` is exit 8.
 
 ## Rules
 1. You never get a prompt: when stdin is not a terminal, `--no-input` is on. A missing value is exit 6 with the field named; a destructive command without `--yes` is exit 2.
