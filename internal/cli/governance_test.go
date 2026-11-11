@@ -109,3 +109,133 @@ func TestATagIsFoundByItsKey(t *testing.T) {
 		t.Fatalf("by id: got %v", got)
 	}
 }
+
+// A tag only classifies: its commands take no masking rules, and its list shows none.
+func TestTagsCarryNoMaskingRules(t *testing.T) {
+	gov := newGovernanceCmd()
+	for _, path := range [][]string{{"tags", "create"}, {"tags", "update"}} {
+		cmd, _, err := gov.Find(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd.Flags().Lookup("rule") != nil {
+			t.Errorf("%v still has --rule", path)
+		}
+		if cmd.Flags().Lookup("active") == nil {
+			t.Errorf("%v lost --active", path)
+		}
+	}
+}
+
+func TestMaskingPolicyCommands(t *testing.T) {
+	gov := newGovernanceCmd()
+	for _, c := range []struct {
+		path  []string
+		flags []string
+	}{
+		{[]string{"masking-policies", "list"}, []string{"tag"}},
+		{[]string{"masking-policies", "describe"}, nil},
+		{[]string{"masking-policies", "get"}, nil},
+		{[]string{"masking-policies", "create"}, []string{"tag", "name", "default", "enabled", "exception", "reason"}},
+		{[]string{"masking-policies", "update"}, []string{"tag", "name", "default", "enabled", "exception", "reason"}},
+		{[]string{"masking-policies", "delete"}, []string{"reason"}},
+	} {
+		cmd, _, err := gov.Find(c.path)
+		if err != nil || cmd.Name() != strings.Fields(cmd.Use)[0] || cmd.Parent().Name() != "masking-policies" {
+			t.Fatalf("%v: %v", c.path, err)
+		}
+		for _, f := range c.flags {
+			if cmd.Flags().Lookup(f) == nil {
+				t.Errorf("%v has no --%s", c.path, f)
+			}
+		}
+	}
+	create, _, _ := gov.Find([]string{"masking-policies", "create"})
+	if f := create.Flags().Lookup("enabled"); f.DefValue != "true" {
+		t.Errorf("a new policy is enabled unless told: %q", f.DefValue)
+	}
+	update, _, _ := gov.Find([]string{"masking-policies", "update"})
+	if f := update.Flags().Lookup("enabled"); f.DefValue != "false" || update.Flags().Changed("enabled") {
+		t.Errorf("update leaves enabled alone unless told")
+	}
+}
+
+func TestParseException(t *testing.T) {
+	cases := []struct {
+		in                     string
+		kind, who, mask, scope string
+		bad                    bool
+	}{
+		{"group:Clinicians=unmasked", "group", "Clinicians", "unmasked", "", false},
+		{"user:ana@example.com=show-last-four@phi.notes", "user", "ana@example.com", "show-last-four", "phi.notes", false},
+		{"ROLE:r1 = deny", "role", "r1", "deny", "", false},
+		{"everyone=nullify", "", "", "", "", true},
+		{"group:=nullify", "", "", "", "", true},
+		{"team:x=nullify", "", "", "", "", true},
+		{"group:Clinicians", "", "", "", "", true},
+		{"group:Clinicians=@phi", "", "", "", "", true},
+	}
+	for _, c := range cases {
+		kind, who, mask, scope, err := parseException(c.in)
+		if c.bad {
+			if err == nil {
+				t.Errorf("%q: want an error", c.in)
+			}
+			continue
+		}
+		if err != nil || kind != c.kind || who != c.who || mask != c.mask || scope != c.scope {
+			t.Errorf("%q: got %q %q %q %q %v", c.in, kind, who, mask, scope, err)
+		}
+	}
+}
+
+func TestShapePolicyResolvesNamesAndTheDefault(t *testing.T) {
+	masks := map[string]string{"nullify": "nullify", "Unmasked": "unmasked", "Last four": "c0ffee"}
+	maskOf := func(ref string) (string, error) {
+		if id, ok := masks[ref]; ok {
+			return id, nil
+		}
+		return "", fmt.Errorf("no mask %q", ref)
+	}
+	groupOf := func(ref string) (string, error) { return "g-" + ref, nil }
+	tagOf := func(ref string) (string, error) { return "t-" + ref, nil }
+
+	body := map[string]any{"defaultMaskId": "nullify", "exceptions": []any{
+		"group:Clinicians=Unmasked", "user:ana@example.com=Last four@phi.notes", "role:r1=nullify",
+		map[string]any{"subject": map[string]any{"type": "role", "id": "r2"}, "maskId": "deny"},
+	}}
+	if err := shapePolicy(body, maskOf, groupOf, tagOf); err != nil {
+		t.Fatal(err)
+	}
+	if body["defaultMaskId"] != "nullify" {
+		t.Errorf("default: %v", body["defaultMaskId"])
+	}
+	ex := body["exceptions"].([]any)
+	first := ex[0].(map[string]any)
+	if first["maskId"] != "unmasked" || first["subject"].(map[string]any)["id"] != "g-Clinicians" || first["scopeTagId"] != nil {
+		t.Errorf("group exception: %v", first)
+	}
+	second := ex[1].(map[string]any)
+	if second["subject"].(map[string]any)["id"] != "ana@example.com" || second["maskId"] != "c0ffee" || second["scopeTagId"] != "t-phi.notes" {
+		t.Errorf("user exception: %v", second)
+	}
+	if third := ex[2].(map[string]any); third["subject"].(map[string]any)["type"] != "role" {
+		t.Errorf("role exception: %v", third)
+	}
+	if len(ex) != 4 {
+		t.Errorf("an exception from a file is kept: %v", ex)
+	}
+
+	for _, org := range []string{"org", "ORG", ""} {
+		b := map[string]any{"defaultMaskId": org}
+		if err := shapePolicy(b, maskOf, groupOf, tagOf); err != nil || b["defaultMaskId"] != nil {
+			t.Errorf("--default %q is the organization's default (null): %v %v", org, b["defaultMaskId"], err)
+		}
+	}
+	if b := (map[string]any{"name": "x"}); shapePolicy(b, maskOf, groupOf, tagOf) != nil || len(b) != 1 {
+		t.Errorf("nothing given, nothing sent: %v", b)
+	}
+	if err := shapePolicy(map[string]any{"exceptions": []any{"group:A=nope"}}, maskOf, groupOf, tagOf); err == nil {
+		t.Error("an unknown mask is refused")
+	}
+}

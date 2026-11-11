@@ -12,51 +12,74 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Data governance, groups and roles through the public API (C5 / DEV-4328): tags and their masking rules, custom
-// masks, the tags of a table's columns, row rules, the policy and the audit log; groups and their members; roles on
+// Data governance, groups and roles through the public API (C5 / DEV-4328): tags (they only classify), masking
+// policies on tags (who sees what), custom masks, the tags of a table's columns, row rules, the policy and the audit log; groups and their members; roles on
 // workspaces and projects. `governance apply` makes the organization's tags and row rules what a file says, so the
 // definitions can live in Git.
 
 const govPath = "/organizations/{org}/governance"
 
 func newGovernanceCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "governance", Aliases: []string{"gov"}, Short: "Data governance: tags, masks, column tags, row rules, policy, audit"}
+	cmd := &cobra.Command{Use: "governance", Aliases: []string{"gov"}, Short: "Data governance: tags, masking policies, masks, column tags, row rules, policy, audit"}
 	cmd.AddCommand(
-		group("tags", "Classification tags and their masking rules", []string{"tag"},
-			opSpec{Use: "list", Short: "List tags with their masking rules", Method: http.MethodGet, Path: govPath + "/tags",
-				Unwrap: "items", Fields: []string{"id", "key", "name", "parentId", "sensitivity", "status", "active", "maskRules"}},
+		group("tags", "Classification tags; what readers see of tagged columns is a masking policy", []string{"tag"},
+			opSpec{Use: "list", Short: "List tags", Method: http.MethodGet, Path: govPath + "/tags",
+				Unwrap: "items", Fields: []string{"id", "key", "name", "parentId", "sensitivity", "status", "active"}},
 			opSpec{Use: "describe TAG", Aliases: []string{"get"}, Short: "Show a tag", Method: http.MethodGet, Path: govPath + "/tags/{tag}",
 				Args: []argSpec{{Name: "TAG", Resolve: resolveTag}}},
 			opSpec{Use: "create", Short: "Create a tag", Method: http.MethodPost, Path: govPath + "/tags", Body: true,
-				Long: `A tag masks the columns it is on, for each reader by its rules (in order).
+				Long: `A tag classifies the columns it is on; what each reader sees of them is a masking policy on the tag
+(peaka gov masking-policies create).
 
-  peaka gov tags create --name PHI --description "Protected health information" \
-      --rule everyone=Nullify --rule group:Clinicians=Unmasked
+  peaka gov tags create --name PHI --description "Protected health information"
   peaka gov tags create --from-file phi.json`,
 				Flags: []flagSpec{
 					{Name: "name", Help: "the tag's name, unique in the organization", Required: true},
 					{Name: "description", Help: "what it classifies"},
 					{Name: "active", Kind: "bool", Help: "masks while active", Default: true},
-					{Name: "rule", Kind: "strings", Help: "a masking rule WHO=MASK, in order: everyone, user:ID, group:NAME|ID, role:ID; MASK a mask name or id; repeatable", Set: rulesSetter},
 					{Name: "key", Help: "a stable key (lowercase letters, digits, _ . -); derived from the name when not given; never changes"},
 					{Name: "parent", Help: "the tag above it in the organization's tree: name, key or id", Resolve: resolveParent},
 					{Name: "sensitivity", Help: "PUBLIC, INTERNAL, CONFIDENTIAL or RESTRICTED; the organization's default when not given"},
 				},
-				Prepare: chain(resolveRuleNames, paramsIntoBody("parent", "parentId"))},
-			opSpec{Use: "update TAG", Short: "Change a tag's name, description, state or rules; what is not given stays (202: waits for approval)", Method: http.MethodPatch,
+				Prepare: paramsIntoBody("parent", "parentId")},
+			opSpec{Use: "update TAG", Short: "Change a tag's name, description, state or place; what is not given stays (202: waits for approval)", Method: http.MethodPatch,
 				Path: govPath + "/tags/{tag}", Body: true, Args: []argSpec{{Name: "TAG", Resolve: resolveTag}},
 				Flags: []flagSpec{
 					{Name: "name", Help: "the tag's name"},
 					{Name: "description", Help: "what it classifies"},
 					{Name: "active", Kind: "bool", Help: "masks while active"},
-					{Name: "rule", Kind: "strings", Help: "the masking rules WHO=MASK, in order (replaces them); repeatable", Set: rulesSetter},
 					{Name: "parent", Help: "the tag above it: name, key or id; none makes it a root", Resolve: resolveParent},
 					{Name: "sensitivity", Help: "PUBLIC, INTERNAL, CONFIDENTIAL or RESTRICTED; none for the organization's default"},
 					{Name: "status", Help: "ACTIVE, or DEPRECATED (no new assignment; columns that have it keep it)"},
 				},
-				Prepare: chain(resolveRuleNames, paramsIntoBody("parent", "parentId"), noneClears("sensitivity"))},
+				Prepare: chain(paramsIntoBody("parent", "parentId"), noneClears("sensitivity"))},
 			opSpec{Use: "delete TAG", Short: "Delete a tag and take it off every column (202: waits for approval)", Method: http.MethodDelete,
 				Path: govPath + "/tags/{tag}", Args: []argSpec{{Name: "TAG", Resolve: resolveTag}}, Confirm: "Delete tag {0} and take it off every column?", Empty: "Deleted."},
+		),
+		group("masking-policies", "Masking policies: what readers see of the columns carrying a tag", []string{"masking-policy", "mp"},
+			opSpec{Use: "list", Short: "List masking policies (of one tag with --tag)", Method: http.MethodGet, Path: govPath + "/masking-policies",
+				Flags:   []flagSpec{{Name: "tag", Help: "only the policies on this tag: name, key or id", Resolve: resolveTag}},
+				Prepare: paramsIntoQuery("tag", "tag"),
+				Unwrap:  "items", Fields: []string{"id", "name", "tagId", "defaultMaskId", "enabled", "exceptions"}},
+			opSpec{Use: "describe POLICY", Aliases: []string{"get"}, Short: "Show a masking policy", Method: http.MethodGet,
+				Path: govPath + "/masking-policies/{policy}", Args: []argSpec{{Name: "POLICY", Resolve: resolvePolicy}}},
+			opSpec{Use: "create", Short: "Create a masking policy on a tag (202: waits for approval)", Method: http.MethodPost, Path: govPath + "/masking-policies", Body: true,
+				Long: `What readers see of the columns carrying a tag (or a tag below it). Every exception naming the reader (as a
+person, through a group, or by a role) applies and the most restrictive wins (Deny, then a mask, then Unmasked);
+a reader no exception names gets the default; the order of exceptions does not matter.
+
+  peaka gov masking-policies create --tag PHI --name "PHI readers" --default nullify \
+      --exception group:Clinicians=unmasked --exception user:ana@example.com=show-last-four@phi.notes`,
+				Flags:   policyFlags(true),
+				Prepare: chain(paramsIntoBody("tag", "tagId"), resolvePolicyNames)},
+			opSpec{Use: "update POLICY", Short: "Change a masking policy; what is not given stays, --exception replaces them all (202: waits for approval)",
+				Method: http.MethodPatch, Path: govPath + "/masking-policies/{policy}", Body: true, Args: []argSpec{{Name: "POLICY", Resolve: resolvePolicy}},
+				Flags:   policyFlags(false),
+				Prepare: chain(paramsIntoBody("tag", "tagId", "policyVersion", "version"), resolvePolicyNames)},
+			opSpec{Use: "delete POLICY", Short: "Delete a masking policy (202: waits for approval)", Method: http.MethodDelete,
+				Path: govPath + "/masking-policies/{policy}", Args: []argSpec{{Name: "POLICY", Resolve: resolvePolicy}},
+				Flags:   []flagSpec{{Name: "reason", In: "query", Help: "why; kept in the Audit log"}},
+				Confirm: "Delete masking policy {0}?", Empty: "Deleted."},
 		),
 		group("masks", "Masks: the predefined ones and the organization's custom masks", []string{"mask"},
 			opSpec{Use: "list", Short: "List masks", Method: http.MethodGet, Path: govPath + "/masks", Unwrap: "items", Fields: []string{"id", "key", "name", "expression", "predefined"}},
@@ -67,7 +90,7 @@ func newGovernanceCmd() *cobra.Command {
 					{Name: "expression", Help: "SQL over {col}", Required: true},
 					{Name: "description", Help: "what it shows"},
 				}},
-			opSpec{Use: "update MASK", Short: "Change a custom mask (202: waits for approval when rules use it)", Method: http.MethodPatch, Path: govPath + "/masks/{mask}",
+			opSpec{Use: "update MASK", Short: "Change a custom mask (202: waits for approval when policies use it)", Method: http.MethodPatch, Path: govPath + "/masks/{mask}",
 				Body: true, Args: []argSpec{{Name: "MASK", Resolve: resolveMask}},
 				Flags: []flagSpec{{Name: "name", Help: "the mask's name"}, {Name: "expression", Help: "SQL over {col}"}, {Name: "description", Help: "what it shows"}}},
 			opSpec{Use: "delete MASK", Short: "Delete a custom mask", Method: http.MethodDelete, Path: govPath + "/masks/{mask}",
@@ -460,67 +483,165 @@ func tableFlags() []flagSpec {
 	}
 }
 
-// rulesSetter keeps the WHO=MASK rules as written; resolveRuleNames turns them into the API's rules.
-func rulesSetter(v any, body map[string]any) {
-	var rules []any
-	for _, s := range v.([]string) {
-		rules = append(rules, s)
+// policyFlags: a masking policy's flags; on create the tag is required and a policy is enabled unless told.
+func policyFlags(create bool) []flagSpec {
+	enabled := flagSpec{Name: "enabled", Kind: "bool", Help: "decides while enabled"}
+	exceptionHelp := "an exception WHO=MASK[@SCOPE_TAG]: user:ID|EMAIL, group:NAME|ID or role:ID; MASK a mask's name, key or id; " +
+		"SCOPE_TAG the policy's tag or one below it; repeatable"
+	if create {
+		enabled.Default = true
+	} else {
+		exceptionHelp += " (replaces them all)"
 	}
-	body["maskRules"] = rules
+	return []flagSpec{
+		{Name: "tag", Help: "the tag it is on: name, key or id", Required: create, Resolve: resolveTag},
+		{Name: "name", Help: "the policy's name (default: the tag's)"},
+		{Name: "default", Key: "defaultMaskId", Help: "what a reader no exception names gets: a mask's name, key or id; org (or empty) for the organization's default"},
+		enabled,
+		{Name: "exception", Kind: "strings", Set: exceptionsSetter, Help: exceptionHelp},
+		{Name: "reason", In: "query", Help: "why; kept in the Audit log"},
+	}
 }
 
-// resolveRuleNames: WHO is everyone, user:ID, group:NAME|ID or role:ID; MASK a mask's id, name or key.
-func resolveRuleNames(c *callCtx) error {
-	raw, ok := c.Body["maskRules"].([]any)
+// resolvePolicy: a masking policy's id or name; the version it was read at goes with the change.
+func resolvePolicy(r *Runtime, ref string, params map[string]string) error {
+	org, err := r.orgID()
+	if err != nil {
+		return err
+	}
+	policies, err := listAt(r, fmt.Sprintf("/organizations/%s/governance/masking-policies", org))
+	if err != nil {
+		return err
+	}
+	p, err := matchOne(policies, ref, "masking policy")
+	if err != nil {
+		return err
+	}
+	params["policy"] = str(p["id"])
+	if v := str(p["version"]); v != "" {
+		params["policyVersion"] = v
+	}
+	return nil
+}
+
+// exceptionsSetter keeps the WHO=MASK[@SCOPE_TAG] exceptions as written; resolvePolicyNames turns them into the API's.
+func exceptionsSetter(v any, body map[string]any) {
+	out := []any{}
+	for _, s := range v.([]string) {
+		out = append(out, s)
+	}
+	body["exceptions"] = out
+}
+
+// resolvePolicyNames: masks, groups and scope tags by name to what the API takes.
+func resolvePolicyNames(c *callCtx) error {
+	var masks []record
+	maskOf := func(ref string) (string, error) {
+		if masks == nil {
+			var err error
+			if masks, err = masksForMatch(rt); err != nil {
+				return "", err
+			}
+		}
+		m, err := matchOne(masks, ref, "mask")
+		if err != nil {
+			return "", err
+		}
+		if k := str(m["key"]); k != "" {
+			return k, nil
+		}
+		return str(m["id"]), nil
+	}
+	groupOf := func(ref string) (string, error) {
+		p := map[string]string{}
+		err := resolveGroup(rt, ref, p)
+		return p["group"], err
+	}
+	tagOf := func(ref string) (string, error) {
+		p := map[string]string{}
+		err := resolveTag(rt, ref, p)
+		return p["tag"], err
+	}
+	return shapePolicy(c.Body, maskOf, groupOf, tagOf)
+}
+
+// shapePolicy turns --default and --exception into the API's defaultMaskId and exceptions. A user is sent as given
+// (an id, or an email the API looks up); a group, a mask and a scope tag are looked up here.
+func shapePolicy(body map[string]any, maskOf, groupOf, tagOf func(string) (string, error)) error {
+	if v, ok := body["defaultMaskId"].(string); ok {
+		ref := strings.TrimSpace(v)
+		if ref == "" || strings.EqualFold(ref, "org") {
+			body["defaultMaskId"] = nil
+		} else {
+			id, err := maskOf(ref)
+			if err != nil {
+				return err
+			}
+			body["defaultMaskId"] = id
+		}
+	}
+	raw, ok := body["exceptions"].([]any)
 	if !ok {
 		return nil
 	}
-	var masks []record
-	var out []any
+	out := []any{}
 	for _, x := range raw {
 		s, isText := x.(string)
 		if !isText {
 			out = append(out, x) // already an object (from --from-file)
 			continue
 		}
-		who, mask, found := strings.Cut(s, "=")
-		if !found {
-			return usage("a rule is WHO=MASK: %q", s)
-		}
-		if masks == nil {
-			var err error
-			if masks, err = masksForMatch(rt); err != nil {
-				return err
-			}
-		}
-		m, err := matchOne(masks, mask, "mask")
+		kind, who, mask, scope, err := parseException(s)
 		if err != nil {
 			return err
 		}
-		subject := map[string]any{}
-		kind, id, _ := strings.Cut(who, ":")
-		switch strings.ToLower(kind) {
-		case "everyone":
-			subject["type"] = "everyone"
-		case "user", "role":
-			subject["type"], subject["id"] = strings.ToLower(kind), id
-		case "group":
-			p := map[string]string{}
-			if err := resolveGroup(rt, id, p); err != nil {
+		if kind == "group" {
+			if who, err = groupOf(who); err != nil {
 				return err
 			}
-			subject["type"], subject["id"] = "group", p["group"]
-		default:
-			return usage("who is everyone, user:ID, group:NAME or role:ID: %q", who)
 		}
-		maskID := str(m["key"])
-		if maskID == "" {
-			maskID = str(m["id"])
+		maskID, err := maskOf(mask)
+		if err != nil {
+			return err
 		}
-		out = append(out, map[string]any{"subject": subject, "maskId": maskID})
+		e := map[string]any{"subject": map[string]any{"type": kind, "id": who}, "maskId": maskID}
+		if scope != "" {
+			id, err := tagOf(scope)
+			if err != nil {
+				return err
+			}
+			e["scopeTagId"] = id
+		}
+		out = append(out, e)
 	}
-	c.Body["maskRules"] = out
+	body["exceptions"] = out
 	return nil
+}
+
+// parseException reads WHO=MASK[@SCOPE_TAG]: WHO is user:ID|EMAIL, group:NAME|ID or role:ID.
+func parseException(s string) (kind, who, mask, scope string, err error) {
+	w, rest, found := strings.Cut(s, "=")
+	if !found || strings.TrimSpace(rest) == "" {
+		return "", "", "", "", usage("an exception is WHO=MASK[@SCOPE_TAG]: %q", s)
+	}
+	mask, scope, _ = strings.Cut(rest, "@")
+	mask, scope = strings.TrimSpace(mask), strings.TrimSpace(scope)
+	k, id, _ := strings.Cut(w, ":")
+	kind, who = strings.ToLower(strings.TrimSpace(k)), strings.TrimSpace(id)
+	switch kind {
+	case "everyone":
+		return "", "", "", "", usage("everyone is the policy's default: use --default, not an exception")
+	case "user", "group", "role":
+		if who == "" {
+			return "", "", "", "", usage("an exception names whom: %s:ID", kind)
+		}
+	default:
+		return "", "", "", "", usage("who is user:ID|EMAIL, group:NAME|ID or role:ID: %q", w)
+	}
+	if mask == "" {
+		return "", "", "", "", usage("an exception names a mask: %q", s)
+	}
+	return kind, who, mask, scope, nil
 }
 
 // ==================== apply ====================
@@ -532,7 +653,7 @@ type govFile struct {
 		Label       string   `yaml:"label"` // the older word for name
 		Description string   `yaml:"description"`
 		Active      *bool    `yaml:"active"`
-		Rules       []string `yaml:"rules"`
+		Rules       []string `yaml:"rules"` // refused: masking is a masking policy now
 	} `yaml:"tags"`
 	RowRules []struct {
 		Name       string `yaml:"name"`
@@ -566,7 +687,6 @@ A change that reveals classified data may wait for a second administrator (202):
   tags:
     - name: PHI
       description: Protected health information
-      rules: ["group:Clinicians=Unmasked", "everyone=Nullify"]
   rowRules:
     - name: Own region
       tag: REGION
@@ -653,16 +773,11 @@ func applyGovernance(file string) error {
 		byLabel[k] = ids[0]
 	}
 	for _, t := range want.Tags {
-		rules := make([]any, len(t.Rules))
-		for i, r := range t.Rules {
-			rules[i] = r
-		}
-		c := &callCtx{Params: map[string]string{}, Body: map[string]any{"name": t.Name, "description": t.Description, "active": t.Active == nil || *t.Active,
-			"maskRules": rules}}
-		if err := resolveRuleNames(c); err != nil {
-			note("tag", t.Name, "resolve", nil, err)
+		if len(t.Rules) > 0 {
+			note("tag", t.Name, "resolve", nil, fmt.Errorf("a tag carries no masking rules; set them with `peaka gov masking-policies create --tag %s`", t.Name))
 			continue
 		}
+		c := &callCtx{Params: map[string]string{}, Body: map[string]any{"name": t.Name, "description": t.Description, "active": t.Active == nil || *t.Active}}
 		if id, ok := byLabel[strings.ToUpper(t.Name)]; ok {
 			resp, err := send(client, http.MethodPatch, base+"/tags/"+id, c.Body)
 			note("tag", t.Name, "update", resp, err)
