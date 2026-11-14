@@ -125,7 +125,7 @@ a reader no exception names gets the default; the order of exceptions does not m
 		),
 		group("table-tags", "Tags on whole tables and schemas: every column below carries them", []string{"scopes"},
 			opSpec{Use: "list", Short: "List the project's table and schema tags", Method: http.MethodGet, Path: govPath + "/table-tags",
-				Prepare: projectIntoQuery, Unwrap: "items", Fields: []string{"id", "tagId", "catalog", "schema", "table", "reason", "createdAt"}},
+				Prepare: projectIntoQuery, Unwrap: "items", Fields: []string{"id", "tagId", "catalogId", "schema", "table", "reason", "createdAt"}},
 			opSpec{Use: "add", Short: "Put a tag on a whole table, or on a whole schema when no table is given (202: may wait for approval)",
 				Method: http.MethodPost, Path: govPath + "/table-tags", Body: true,
 				Long: `Every column of the table (or of every table of the schema) carries the tag, columns added later too. A schema tag
