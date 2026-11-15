@@ -283,10 +283,15 @@ func (o opSpec) run(cmd *cobra.Command, args []string, values []*flagValue, from
 		payload = c.Body
 	}
 	// The governance lists are walked whole (call follows nextCursor): ask for the largest page they serve.
-	if o.Method == "GET" && o.Unwrap == "items" && strings.Contains(path, "/governance/") && c.Query.Get("limit") == "" {
+	if o.Method == "GET" && o.Unwrap == "items" && strings.Contains(path, "/governance/") && c.Query.Get("limit") == "" && !isLog(path) {
 		c.Query.Set("limit", "500")
 	}
 	return rt.call(o.Method, path, c.Query, payload, o.Unwrap, o.Fields, o.Empty)
+}
+
+// isLog: a list that only grows (decision records, the audit log): one page at a time, --cursor for the next.
+func isLog(path string) bool {
+	return strings.HasSuffix(path, "/decisions") || strings.HasSuffix(path, "/audit-events")
 }
 
 // call sends the request and prints the answer by the output contract.
@@ -321,7 +326,7 @@ func (r *Runtime) call(method, path string, query url.Values, body any, unwrap s
 	}
 	// A page of the public API ({items, nextCursor, hasMore}) is followed to its end: printing the first page alone
 	// would read as the whole list (milestone 1, DEV-4250). A caller that names a cursor asked for that page only.
-	if m, ok := v.(map[string]any); ok && method == "GET" && unwrap == "items" && query.Get("cursor") == "" {
+	if m, ok := v.(map[string]any); ok && method == "GET" && unwrap == "items" && query.Get("cursor") == "" && !isLog(path) {
 		if more, _ := m["hasMore"].(bool); more {
 			items, _ := m["items"].([]any)
 			seen := map[string]bool{}
@@ -356,6 +361,11 @@ func (r *Runtime) call(method, path string, query url.Values, body any, unwrap s
 			m["items"] = items
 			m["hasMore"] = false
 			delete(m, "nextCursor")
+		}
+	}
+	if m, ok := v.(map[string]any); ok && isLog(path) {
+		if next, _ := m["nextCursor"].(string); next != "" {
+			r.note("More records: add --cursor %s", next)
 		}
 	}
 	if unwrap != "" {

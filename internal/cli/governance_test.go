@@ -382,3 +382,64 @@ func TestAListFollowsEveryPage(t *testing.T) {
 		}
 	}
 }
+
+// Round 2 (DEV-4250): the commands and their flags.
+func TestRoundTwoCommands(t *testing.T) {
+	gov := newGovernanceCmd()
+	for _, c := range []struct {
+		path  []string
+		flags []string
+	}{
+		{[]string{"sources", "list"}, nil},
+		{[]string{"sources", "create"}, []string{"kind", "catalog-id", "apply-as", "interval", "import-classes", "enabled"}},
+		{[]string{"sources", "update"}, []string{"apply-as", "interval", "import-classes", "enabled"}},
+		{[]string{"sources", "sync"}, nil},
+		{[]string{"sources", "map"}, []string{"class", "tag", "ignore"}},
+		{[]string{"patterns", "set"}, []string{"class", "pattern", "enabled"}},
+		{[]string{"declassifications", "create"}, []string{"object-kind", "object-id", "catalog-id", "schema", "table", "column", "tag", "reason", "scope", "days", "source"}},
+		{[]string{"declassifications", "revoke"}, nil},
+		{[]string{"access", "column"}, []string{"catalog-id", "schema", "table", "column", "limit"}},
+		{[]string{"access", "holders"}, []string{"catalog-id", "schema", "table", "column"}},
+		{[]string{"access", "member"}, nil},
+		{[]string{"access", "exposure"}, []string{"q", "tag"}},
+		{[]string{"access", "readers"}, []string{"tag", "days"}},
+		{[]string{"decisions"}, []string{"user", "query", "catalog-id", "schema", "table", "denied", "tag", "since", "limit", "cursor"}},
+		{[]string{"row-rules", "reaching"}, []string{"catalog-id", "schema", "table"}},
+		{[]string{"row-rules", "problems"}, nil},
+	} {
+		cmd, _, err := gov.Find(c.path)
+		if err != nil || cmd.Name() != c.path[len(c.path)-1] {
+			t.Fatalf("%v: %v", c.path, err)
+		}
+		for _, f := range c.flags {
+			if cmd.Flags().Lookup(f) == nil {
+				t.Errorf("%v has no --%s", c.path, f)
+			}
+		}
+	}
+}
+
+func TestDeclassifySources(t *testing.T) {
+	c := &callCtx{Body: map[string]any{"sourceRefs": []string{"p1:7.public.people.ssn"}}}
+	if err := declassifySources(c); err != nil {
+		t.Fatal(err)
+	}
+	got := c.Body["sources"].([]any)[0].(map[string]any)
+	if got["projectId"] != "p1" || got["catalogId"] != "7" || got["column"] != "ssn" || c.Body["sourceRefs"] != nil {
+		t.Fatalf("sources: %v", c.Body)
+	}
+	for _, bad := range []string{"7.public.people.ssn", "p1:7.public.people", "p1:"} {
+		if err := declassifySources(&callCtx{Body: map[string]any{"sourceRefs": []string{bad}}}); err == nil {
+			t.Errorf("%q is refused", bad)
+		}
+	}
+	if err := declassifySources(&callCtx{Body: map[string]any{}}); err != nil {
+		t.Error("no --source sends none")
+	}
+}
+
+func TestLogsAreNotWalkedWhole(t *testing.T) {
+	if !isLog("/organizations/o/governance/decisions") || !isLog("/organizations/o/governance/audit-events") || isLog("/organizations/o/governance/tags") {
+		t.Fatal("decisions and the audit log are read a page at a time; other lists whole")
+	}
+}

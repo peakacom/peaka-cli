@@ -204,6 +204,18 @@ is for a connected catalog: a Peaka table's schema is its own.
 				Unwrap: "items", Fields: []string{"id", "name", "target.type", "target.table", "target.tagId", "enabled", "expression", "exceptions"}},
 			opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show a row rule", Method: http.MethodGet, Path: govPath + "/row-rules/{id}",
 				Args: []argSpec{{Name: "ID", Param: "id"}}},
+			opSpec{Use: "reaching", Short: "Every row rule a read of a table gets: its own and the tag rules that reach it", Method: http.MethodGet,
+				Path: govPath + "/row-rules/reaching",
+				Long: "  peaka gov row-rules reaching --catalog-id 7 --schema payment --table charges",
+				Flags: []flagSpec{
+					{Name: "catalog-id", In: "query", Key: "catalogId", Help: "the table's catalog", Required: true},
+					{Name: "schema", In: "query", Help: "the table's schema", Required: true},
+					{Name: "table", In: "query", Help: "the table", Required: true},
+				},
+				Prepare: projectIntoQuery},
+			opSpec{Use: "problems", Short: "Rules on a tag whose condition does not hold on a column the tag reaches", Method: http.MethodGet,
+				Path: govPath + "/row-rules/problems", Unwrap: "items",
+				Fields: []string{"ruleName", "sqlName", "column", "detail", "foundAt"}},
 			opSpec{Use: "create", Short: "Write a row rule on a table or a tag", Method: http.MethodPost, Path: govPath + "/row-rules", Body: true,
 				Long: `On a table (as the project's SQL names it), or on a tag with {col} for the tagged column:
 
@@ -280,6 +292,115 @@ classifications that cannot be read, materialized queries that would be refused,
 				Path: govPath + "/tag-suggestions/reject", Body: true, Flags: manySuggestionFlags(), Prepare: manySuggestions,
 				Unwrap: "outcomes", Fields: []string{"id", "outcome", "message"}},
 		),
+		group("sources", "Classification sources: a catalog whose own system keeps column classes, mapped to tags", []string{"source", "classification-sources"},
+			opSpec{Use: "list", Short: "List classification sources", Method: http.MethodGet, Path: govPath + "/classification-sources",
+				Unwrap: "items", Fields: []string{"id", "kind", "projectId", "catalogId", "applyAs", "enabled", "lastStatus", "lastSyncAt"}},
+			opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show a source and its class mappings", Method: http.MethodGet,
+				Path: govPath + "/classification-sources/{id}", Args: []argSpec{{Name: "ID", Param: "id"}}},
+			opSpec{Use: "create", Short: "Start reading a catalog's column classes", Method: http.MethodPost, Path: govPath + "/classification-sources", Body: true,
+				Long: `  peaka gov sources create --kind SNOWFLAKE --catalog-id 7 --apply-as SUGGESTED --interval 1440
+  peaka gov sources create --kind DETECTOR --catalog-id 7`,
+				Flags: []flagSpec{
+					{Name: "kind", Help: "SNOWFLAKE, OPENMETADATA, DATAPLEX or DETECTOR", Required: true},
+					{Name: "catalog-id", Key: "catalogId", Help: "the catalog it reads (the project's own)", Required: true},
+					{Name: "apply-as", Key: "applyAs", Help: "EXTERNAL (classes become tags) or SUGGESTED (they wait as suggestions)"},
+					{Name: "interval", Key: "syncIntervalMinutes", Kind: "int", Help: "minutes between syncs; none: by hand"},
+					{Name: "import-classes", Key: "importClasses", Kind: "bool", Help: "a class without a mapping becomes a tag of its own"},
+					{Name: "enabled", Kind: "bool", Help: "syncs", Default: true},
+				},
+				Prepare: projectIntoBody},
+			opSpec{Use: "update ID", Short: "Change a source; what is not given stays", Method: http.MethodPatch, Path: govPath + "/classification-sources/{id}",
+				Body: true, Args: []argSpec{{Name: "ID", Param: "id"}},
+				Flags: []flagSpec{
+					{Name: "apply-as", Key: "applyAs", Help: "EXTERNAL or SUGGESTED"},
+					{Name: "interval", Key: "syncIntervalMinutes", Kind: "int", Help: "minutes between syncs"},
+					{Name: "import-classes", Key: "importClasses", Kind: "bool", Help: "a class without a mapping becomes a tag of its own"},
+					{Name: "enabled", Kind: "bool", Help: "syncs"},
+				}},
+			opSpec{Use: "delete ID", Short: "Delete a source; the tags it put on stay", Method: http.MethodDelete, Path: govPath + "/classification-sources/{id}",
+				Args: []argSpec{{Name: "ID", Param: "id"}}, Confirm: "Delete classification source {0}?", Empty: "Deleted."},
+			opSpec{Use: "sync ID", Short: "Read the source now", Method: http.MethodPost, Path: govPath + "/classification-sources/{id}/sync",
+				Args: []argSpec{{Name: "ID", Param: "id"}}},
+			opSpec{Use: "map ID", Short: "What a class of the source becomes: a tag, or nothing (--ignore)", Method: http.MethodPut,
+				Path: govPath + "/classification-sources/{id}/mappings", Body: true, Args: []argSpec{{Name: "ID", Param: "id"}},
+				Long: "  peaka gov sources map 3f2a… --class PII.EMAIL --tag Email",
+				Flags: []flagSpec{
+					{Name: "class", Key: "externalClass", Help: "the class as the source names it", Required: true},
+					{Name: "tag", Key: "tagId", Help: "the tag it becomes: name, key or id"},
+					{Name: "ignore", Key: "ignored", Kind: "bool", Help: "the class is not taken"},
+				}},
+		),
+		group("patterns", "The column-name patterns Peaka's detector suggests classes by", []string{"detection-patterns"},
+			opSpec{Use: "list", Short: "List detection patterns", Method: http.MethodGet, Path: govPath + "/detection-patterns",
+				Unwrap: "items", Fields: []string{"id", "className", "columnPattern", "builtin", "enabled"}},
+			opSpec{Use: "set", Short: "Add a pattern, or switch a class's pattern on or off", Method: http.MethodPut, Path: govPath + "/detection-patterns", Body: true,
+				Long: "  peaka gov patterns set --class EMAIL --pattern '*e?mail*'",
+				Flags: []flagSpec{
+					{Name: "class", Key: "className", Help: "the class", Required: true},
+					{Name: "pattern", Key: "columnPattern", Help: "column names: * any characters, ? one", Required: true},
+					{Name: "enabled", Kind: "bool", Help: "suggests", Default: true},
+				},
+				Unwrap: "items", Fields: []string{"id", "className", "columnPattern", "builtin", "enabled"}},
+			opSpec{Use: "delete ID", Short: "Delete one of the organization's own patterns", Method: http.MethodDelete, Path: govPath + "/detection-patterns/{id}",
+				Args: []argSpec{{Name: "ID", Param: "id"}}, Unwrap: "items", Fields: []string{"id", "className", "columnPattern", "builtin", "enabled"}},
+		),
+		group("declassifications", "Lifting an inherited tag from a product's column, while its SQL stays the same", []string{"declassify", "declassification"},
+			opSpec{Use: "list", Short: "Active declassifications (-f active=false for every one)", Method: http.MethodGet, Path: govPath + "/declassifications",
+				Query: true, Unwrap: "items", Fields: []string{"id", "objectKind", "objectId", "column", "tagId", "status", "expiresAt", "approvedBy"}},
+			opSpec{Use: "create", Short: "Lift a tag from a product's column (202: waits for approval)", Method: http.MethodPost, Path: govPath + "/declassifications", Body: true,
+				Long: `Name the product by --object-kind and --object-id, or by its table; --source narrows it to some source columns.
+
+  peaka gov declassify create --object-kind MATERIALIZED_QUERY --object-id 1289… --column email_domain --tag PII --reason "domain only"`,
+				Flags: []flagSpec{
+					{Name: "object-kind", Key: "objectKind", Help: "MATERIALIZED_QUERY, SEMANTIC_TABLE, …"},
+					{Name: "object-id", Key: "objectId", Help: "the product's id"},
+					{Name: "catalog-id", Key: "catalogId", Help: "or the product's table: its catalog"},
+					{Name: "schema", Key: "schema", Help: "the table's schema"},
+					{Name: "table", Key: "table", Help: "the table"},
+					{Name: "column", Key: "column", Help: "the product's column", Required: true},
+					{Name: "tag", Key: "tagId", Help: "the inherited tag: name, key or id", Required: true},
+					{Name: "reason", Help: "why", Required: true},
+					{Name: "scope", Help: "what it is for"},
+					{Name: "days", Key: "durationDays", Kind: "int", Help: "how many days it lasts"},
+					{Name: "source", Key: "sourceRefs", Kind: "strings", Help: "a source column PROJECT:CATALOG_ID.SCHEMA.TABLE.COLUMN; repeatable"},
+				},
+				Prepare: chain(projectIntoBody, declassifySources)},
+			opSpec{Use: "revoke ID", Short: "The tag applies again from the next read", Method: http.MethodDelete, Path: govPath + "/declassifications/{id}",
+				Args: []argSpec{{Name: "ID", Param: "id"}}, Confirm: "Revoke declassification {0}?"},
+		),
+		group("access", "Who reads what: a column's readers, a member's view, exposure, recent readers", nil,
+			opSpec{Use: "column", Short: "Every member and what each sees of a column", Method: http.MethodGet, Path: govPath + "/access/columns",
+				Long: "  peaka gov access column --catalog-id 7 --schema public --table people --column ssn",
+				Flags: append(columnQueryFlags(), flagSpec{Name: "limit", In: "query", Kind: "int", Help: "members a page"}),
+				Prepare: projectIntoQuery, Unwrap: "members", Fields: []string{"member.email", "effect", "code", "rule"}},
+			opSpec{Use: "holders", Short: "The rules that unmask a column and whom each names", Method: http.MethodGet, Path: govPath + "/access/columns/holders",
+				Flags: columnQueryFlags(), Prepare: projectIntoQuery, Unwrap: "holders", Fields: []string{"kind", "name", "tag", "policy", "mask", "members"}},
+			opSpec{Use: "member USER_ID", Short: "What a member sees of every classified column", Method: http.MethodGet, Path: govPath + "/access/members/{user}",
+				Args: []argSpec{{Name: "USER_ID", Param: "user"}}, Unwrap: "rows", Fields: []string{"table.sqlName", "column", "effect", "rule"}},
+			opSpec{Use: "exposure BY", Short: "How far classified data reaches: BY is tags, columns or members", Method: http.MethodGet, Path: govPath + "/access/exposure/{by}",
+				Args: []argSpec{{Name: "BY", Param: "by"}},
+				Flags: []flagSpec{{Name: "q", In: "query", Help: "search"}, {Name: "tag", In: "query", Help: "columns of this tag (name, key or id)"}},
+				Unwrap: "items"},
+			opSpec{Use: "readers", Short: "Who read a tag's columns lately, and how", Method: http.MethodGet, Path: govPath + "/access/readers",
+				Flags: []flagSpec{{Name: "tag", In: "query", Help: "the tag: name, key or id", Required: true}, {Name: "days", In: "query", Kind: "int", Help: "how far back (90; at most 365)"}},
+				Unwrap: "items"},
+		),
+		opSpec{Use: "decisions", Short: "What was decided on each read, newest first", Method: http.MethodGet, Path: govPath + "/decisions",
+			Long: `  peaka gov decisions --user 2b19… --denied
+  peaka gov decisions --catalog-id 7 --schema payment --table charges --since 2026-11-01T00:00:00Z`,
+			Flags: []flagSpec{
+				{Name: "user", In: "query", Key: "userId", Help: "a member's id"},
+				{Name: "query", In: "query", Key: "queryId", Help: "a query's id"},
+				{Name: "catalog-id", In: "query", Key: "catalogId", Help: "the table's catalog"},
+				{Name: "schema", In: "query", Help: "the table's schema"},
+				{Name: "table", In: "query", Help: "the table"},
+				{Name: "denied", In: "query", Kind: "bool", Help: "only refused reads"},
+				{Name: "tag", In: "query", Help: "reads deciding this tag"},
+				{Name: "since", In: "query", Help: "ISO-8601 instant"},
+				{Name: "limit", In: "query", Kind: "int", Help: "records a page (at most 500)"},
+				{Name: "cursor", In: "query", Help: "the page after: the cursor the page before names on stderr"},
+			},
+			Unwrap: "items", Fields: []string{"createdAt", "userId", "sqlName", "kind", "denied", "policyVersion"}}.command(),
 		group("changes", "Changes waiting for a second administrator", []string{"change-requests", "approvals"},
 			opSpec{Use: "list", Short: "Changes waiting for approval (-f status=ALL for every one)", Method: http.MethodGet, Path: govPath + "/change-requests",
 				Query: true, Unwrap: "items", Fields: []string{"id", "kind", "summary", "status", "requestedBy", "createdAt"}},
@@ -647,6 +768,35 @@ func manySuggestions(c *callCtx) error {
 	if v, ok := c.Body["limit"].(int); ok && v == 0 {
 		delete(c.Body, "limit")
 	}
+	return nil
+}
+
+func columnQueryFlags() []flagSpec {
+	return []flagSpec{
+		{Name: "catalog-id", In: "query", Key: "catalogId", Help: "the table's catalog", Required: true},
+		{Name: "schema", In: "query", Help: "the table's schema", Required: true},
+		{Name: "table", In: "query", Help: "the table", Required: true},
+		{Name: "column", In: "query", Help: "the column", Required: true},
+	}
+}
+
+// declassifySources: --source PROJECT:CATALOG_ID.SCHEMA.TABLE.COLUMN as the body's sources.
+func declassifySources(c *callCtx) error {
+	refs, _ := c.Body["sourceRefs"].([]string)
+	delete(c.Body, "sourceRefs")
+	if len(refs) == 0 {
+		return nil
+	}
+	out := []any{}
+	for _, r := range refs {
+		project, rest, ok := strings.Cut(r, ":")
+		parts := strings.Split(rest, ".")
+		if !ok || project == "" || len(parts) != 4 {
+			return usage("--source is PROJECT:CATALOG_ID.SCHEMA.TABLE.COLUMN, not %q", r)
+		}
+		out = append(out, map[string]any{"projectId": project, "catalogId": parts[0], "schema": parts[1], "table": parts[2], "column": parts[3]})
+	}
+	c.Body["sources"] = out
 	return nil
 }
 
