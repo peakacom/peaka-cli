@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -237,5 +238,147 @@ func TestShapePolicyResolvesNamesAndTheDefault(t *testing.T) {
 	}
 	if err := shapePolicy(map[string]any{"exceptions": []any{"group:A=nope"}}, maskOf, groupOf, tagOf); err == nil {
 		t.Error("an unknown mask is refused")
+	}
+}
+
+// Milestone 1 (DEV-4250): the commands and their flags.
+func TestMilestoneOneCommands(t *testing.T) {
+	gov := newGovernanceCmd()
+	for _, c := range []struct {
+		path  []string
+		flags []string
+	}{
+		{[]string{"tags", "list"}, []string{"parent", "q", "status"}},
+		{[]string{"masking-policies", "list"}, []string{"tag", "enabled", "q"}},
+		{[]string{"column-tags", "search"}, []string{"tag", "project", "catalog-id", "schema", "table", "q"}},
+		{[]string{"column-tags", "set"}, []string{"catalog-id", "schema", "table", "tag-column", "none", "reason"}},
+		{[]string{"table-tags", "list"}, []string{"tag", "catalog-id", "schema", "table"}},
+		{[]string{"row-rules", "list"}, []string{"project", "catalog-id", "schema", "table", "tag", "target", "enabled", "q"}},
+		{[]string{"row-rules", "create"}, []string{"except"}},
+		{[]string{"row-rules", "update"}, []string{"except", "no-exceptions"}},
+		{[]string{"suggestions", "list"}, []string{"status", "project", "tag", "source", "q", "order"}},
+		{[]string{"suggestions", "describe"}, nil},
+		{[]string{"suggestions", "create"}, []string{"catalog-id", "schema", "table", "column", "tag", "reason"}},
+		{[]string{"suggestions", "approve"}, []string{"note"}},
+		{[]string{"suggestions", "reject"}, []string{"note"}},
+		{[]string{"suggestions", "approve-many"}, []string{"id", "project", "tag", "source", "q", "limit", "note"}},
+		{[]string{"suggestions", "reject-many"}, []string{"id", "project", "tag", "source", "q", "limit", "note"}},
+	} {
+		cmd, _, err := gov.Find(c.path)
+		if err != nil || cmd.Name() != c.path[len(c.path)-1] {
+			t.Fatalf("%v: %v", c.path, err)
+		}
+		for _, f := range c.flags {
+			if cmd.Flags().Lookup(f) == nil {
+				t.Errorf("%v has no --%s", c.path, f)
+			}
+		}
+	}
+}
+
+func TestRowRuleExceptions(t *testing.T) {
+	c := &callCtx{Body: map[string]any{"except": []string{"group:auditors", "USER:2b1988d5-fff8-4bb2-bb44-bf00c810cf32", "role:admins"}}}
+	if err := rowRuleExceptions(c); err != nil {
+		t.Fatal(err)
+	}
+	got := c.Body["exceptions"].([]any)
+	if len(got) != 3 || got[1].(map[string]any)["subject"].(map[string]any)["type"] != "user" {
+		t.Fatalf("exceptions: %v", got)
+	}
+	if _, left := c.Body["except"]; left {
+		t.Fatal("--except is not sent as it is")
+	}
+	none := &callCtx{Body: map[string]any{"noExceptions": true}}
+	if err := rowRuleExceptions(none); err != nil || len(none.Body["exceptions"].([]any)) != 0 {
+		t.Fatalf("--no-exceptions sends an empty list: %v %v", none.Body, err)
+	}
+	keep := &callCtx{Body: map[string]any{}}
+	if err := rowRuleExceptions(keep); err != nil || keep.Body["exceptions"] != nil {
+		t.Fatalf("neither flag keeps them: %v", keep.Body)
+	}
+	for _, bad := range [][]string{{"team:x"}, {"group:"}, {"auditors"}} {
+		if err := rowRuleExceptions(&callCtx{Body: map[string]any{"except": bad}}); err == nil {
+			t.Errorf("%v is refused", bad)
+		}
+	}
+	if err := rowRuleExceptions(&callCtx{Body: map[string]any{"except": []string{"group:a"}, "noExceptions": true}}); err == nil {
+		t.Error("--except with --no-exceptions is refused")
+	}
+}
+
+func TestManySuggestions(t *testing.T) {
+	byIDs := &callCtx{Body: map[string]any{"ids": []string{"a", "b"}, "limit": 0}}
+	if err := manySuggestions(byIDs); err != nil || byIDs.Body["filter"] != nil || byIDs.Body["limit"] != nil {
+		t.Fatalf("ids: %v %v", byIDs.Body, err)
+	}
+	byFilter := &callCtx{Body: map[string]any{"fTag": "PII", "fProject": "p1", "limit": 50}}
+	if err := manySuggestions(byFilter); err != nil {
+		t.Fatal(err)
+	}
+	f := byFilter.Body["filter"].(map[string]any)
+	if f["tagId"] != "PII" || f["projectId"] != "p1" || byFilter.Body["fTag"] != nil {
+		t.Fatalf("filter: %v", byFilter.Body)
+	}
+	if err := manySuggestions(&callCtx{Body: map[string]any{}}); err == nil {
+		t.Error("nothing named is refused")
+	}
+	if err := manySuggestions(&callCtx{Body: map[string]any{"ids": []string{"a"}, "fQ": "x"}}); err == nil {
+		t.Error("ids and a filter together are refused")
+	}
+}
+
+func TestTableColumnTags(t *testing.T) {
+	id := "b220ce38-f2e8-4454-a17b-1c3b9f87f64e"
+	c := &callCtx{Body: map[string]any{"tagColumns": []string{"ssn=" + id, " email = " + id}}}
+	if err := tableColumnTags(c); err != nil {
+		t.Fatal(err)
+	}
+	cols := c.Body["columns"].([]map[string]any)
+	if len(cols) != 2 || cols[1]["column"] != "email" || cols[1]["tagId"] != id {
+		t.Fatalf("columns: %v", cols)
+	}
+	none := &callCtx{Body: map[string]any{"none": true}}
+	if err := tableColumnTags(none); err != nil || len(none.Body["columns"].([]map[string]any)) != 0 {
+		t.Fatalf("--none sends no column: %v %v", none.Body, err)
+	}
+	if err := tableColumnTags(&callCtx{Body: map[string]any{}}); err == nil {
+		t.Error("neither --tag-column nor --none is refused")
+	}
+	if err := tableColumnTags(&callCtx{Body: map[string]any{"tagColumns": []string{"ssn"}}}); err == nil {
+		t.Error("a pair without = is refused")
+	}
+}
+
+// A list command prints every page: the first alone would read as the whole list.
+func TestAListFollowsEveryPage(t *testing.T) {
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		asked = append(asked, req.URL.Query().Get("cursor"))
+		w.Header().Set("Content-Type", "application/json")
+		switch req.URL.Query().Get("cursor") {
+		case "":
+			fmt.Fprint(w, `{"items":[{"id":"a"}],"nextCursor":"c2","hasMore":true}`)
+		case "c2":
+			fmt.Fprint(w, `{"items":[{"id":"b"}],"nextCursor":"c3","hasMore":true}`)
+		case "c3":
+			fmt.Fprint(w, `{"items":[{"id":"c"}],"nextCursor":null,"hasMore":false}`)
+		}
+	}))
+	defer srv.Close()
+	var out strings.Builder
+	r := &Runtime{Ctx: context.Background(), Settings: &config.Settings{Source: map[string]string{}}, client: api.New(srv.URL, "test", time.Second),
+		Out: &out, Err: &out}
+	gf.format = "json"
+	defer func() { gf.format = "" }()
+	if err := r.call("GET", "/organizations/o/governance/tags", url.Values{}, nil, "items", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(asked, ",") != ",c2,c3" {
+		t.Fatalf("pages asked: %v", asked)
+	}
+	for _, id := range []string{`"a"`, `"b"`, `"c"`} {
+		if !strings.Contains(out.String(), id) {
+			t.Errorf("%s missing from %s", id, out.String())
+		}
 	}
 }

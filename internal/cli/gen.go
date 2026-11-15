@@ -282,6 +282,10 @@ func (o opSpec) run(cmd *cobra.Command, args []string, values []*flagValue, from
 	if o.Body || len(c.Body) > 0 {
 		payload = c.Body
 	}
+	// The governance lists are walked whole (call follows nextCursor): ask for the largest page they serve.
+	if o.Method == "GET" && o.Unwrap == "items" && strings.Contains(path, "/governance/") && c.Query.Get("limit") == "" {
+		c.Query.Set("limit", "500")
+	}
 	return rt.call(o.Method, path, c.Query, payload, o.Unwrap, o.Fields, o.Empty)
 }
 
@@ -314,6 +318,45 @@ func (r *Runtime) call(method, path string, query url.Values, body any, unwrap s
 	var v any
 	if err := decodeJSON(raw, &v); err != nil {
 		return err
+	}
+	// A page of the public API ({items, nextCursor, hasMore}) is followed to its end: printing the first page alone
+	// would read as the whole list (milestone 1, DEV-4250). A caller that names a cursor asked for that page only.
+	if m, ok := v.(map[string]any); ok && method == "GET" && unwrap == "items" && query.Get("cursor") == "" {
+		if more, _ := m["hasMore"].(bool); more {
+			items, _ := m["items"].([]any)
+			seen := map[string]bool{}
+			next, _ := m["nextCursor"].(string)
+			for pages := 1; more; pages++ {
+				if next == "" || seen[next] {
+					return fmt.Errorf("the list of %s says there is more but gives no new cursor", path)
+				}
+				if pages == maxPages {
+					return fmt.Errorf("the list of %s has more than %d pages; stopped", path, maxPages)
+				}
+				seen[next] = true
+				q := url.Values{}
+				for k, vs := range query {
+					q[k] = vs
+				}
+				q.Set("cursor", next)
+				var page struct {
+					Items      []any  `json:"items"`
+					NextCursor string `json:"nextCursor"`
+					HasMore    bool   `json:"hasMore"`
+				}
+				if _, err := client.Do(r.Ctx, method, path, q, nil, &raw); err != nil {
+					return err
+				}
+				if err := decodeJSON(raw, &page); err != nil {
+					return err
+				}
+				items = append(items, page.Items...)
+				more, next = page.HasMore, page.NextCursor
+			}
+			m["items"] = items
+			m["hasMore"] = false
+			delete(m, "nextCursor")
+		}
 	}
 	if unwrap != "" {
 		if m, ok := v.(map[string]any); ok {

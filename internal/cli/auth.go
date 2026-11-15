@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -138,6 +139,25 @@ func newAuthLogoutCmd() *cobra.Command {
 				if a, _ := config.FindAccount(host, rt.Config.Account); a == nil {
 					rt.Config.Account = ""
 					_ = config.Save(rt.Config)
+				}
+			}
+			// Catalight CUS-71: after logout, commands still ran. What they ran with is said here.
+			if k := os.Getenv("PEAKA_API_KEY"); k != "" {
+				rt.note("PEAKA_API_KEY (%s) is set in your environment: commands keep using it until you unset it", keyPrefix(k))
+			}
+			if all {
+				if left, _ := config.Accounts(""); len(left) > 0 {
+					hosts := map[string]bool{}
+					for _, a := range left {
+						hosts[a.Host] = true
+					}
+					names := make([]string, 0, len(hosts))
+					for h := range hosts {
+						names = append(names, h)
+					}
+					sort.Strings(names)
+					rt.note("Accounts are still stored for %s: `peaka auth logout --all --api-url URL` for each, or `peaka auth list --all-hosts`",
+						strings.Join(names, ", "))
 				}
 			}
 			return nil

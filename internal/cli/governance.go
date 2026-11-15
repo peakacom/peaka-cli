@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/peakacom/peaka-cli/internal/api"
@@ -19,11 +20,18 @@ import (
 
 const govPath = "/organizations/{org}/governance"
 
+var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
 func newGovernanceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "governance", Aliases: []string{"gov"}, Short: "Data governance: tags, masking policies, masks, column tags, row rules, policy, audit"}
 	cmd.AddCommand(
 		group("tags", "Classification tags; what readers see of tagged columns is a masking policy", []string{"tag"},
-			opSpec{Use: "list", Short: "List tags", Method: http.MethodGet, Path: govPath + "/tags",
+			opSpec{Use: "list", Short: "List tags (the whole tree; --parent one level, --q a search)", Method: http.MethodGet, Path: govPath + "/tags",
+				Flags: []flagSpec{
+					{Name: "parent", In: "query", Key: "parentId", Help: "only the tags right under this tag (its id), or root for the top level"},
+					{Name: "q", In: "query", Help: "text in the tag's name or key"},
+					{Name: "status", In: "query", Help: "ACTIVE or DEPRECATED"},
+				},
 				Unwrap: "items", Fields: []string{"id", "key", "name", "parentId", "sensitivity", "status", "active"}},
 			opSpec{Use: "describe TAG", Aliases: []string{"get"}, Short: "Show a tag", Method: http.MethodGet, Path: govPath + "/tags/{tag}",
 				Args: []argSpec{{Name: "TAG", Resolve: resolveTag}}},
@@ -58,7 +66,9 @@ func newGovernanceCmd() *cobra.Command {
 		),
 		group("masking-policies", "Masking policies: what readers see of the columns carrying a tag", []string{"masking-policy", "mp"},
 			opSpec{Use: "list", Short: "List masking policies (of one tag with --tag)", Method: http.MethodGet, Path: govPath + "/masking-policies",
-				Flags:   []flagSpec{{Name: "tag", Help: "only the policies on this tag: name, key or id", Resolve: resolveTag}},
+				Flags: []flagSpec{{Name: "tag", Help: "only the policies on this tag: name, key or id", Resolve: resolveTag},
+					{Name: "enabled", In: "query", Help: "true or false: only the policies switched on or off"},
+					{Name: "q", In: "query", Help: "text in the policy's name"}},
 				Prepare: paramsIntoQuery("tag", "tag"),
 				Unwrap:  "items", Fields: []string{"id", "name", "tagId", "defaultMaskId", "enabled", "exceptions"}},
 			opSpec{Use: "describe POLICY", Aliases: []string{"get"}, Short: "Show a masking policy", Method: http.MethodGet,
@@ -102,6 +112,33 @@ a reader no exception names gets the default; the order of exceptions does not m
 				Args:    []argSpec{{Name: "CATALOG_ID", Param: "catalog"}, {Name: "SCHEMA", Param: "schema"}, {Name: "TABLE", Param: "table"}},
 				Prepare: chain(projectIntoQuery, paramsIntoQuery("catalog", "catalogId", "schema", "schema", "table", "table")),
 				Unwrap:  "items", Fields: []string{"id", "column", "tagId", "origin", "reason"}},
+			opSpec{Use: "search", Short: "The organization's column tags: by tag, project, catalog, schema, table or a text", Method: http.MethodGet,
+				Path: govPath + "/column-tags",
+				Long: `  peaka gov column-tags search --tag PHI
+  peaka gov column-tags search --project OtnUT0en --catalog-id 7 --schema public --q ssn`,
+				Flags: []flagSpec{
+					{Name: "tag", In: "query", Help: "only this tag: name, key or id"},
+					{Name: "project", In: "query", Key: "projectId", Help: "only this project's tables (its id)"},
+					{Name: "catalog-id", In: "query", Key: "catalogId", Help: "only this catalog"},
+					{Name: "schema", In: "query", Help: "only this schema"},
+					{Name: "table", In: "query", Help: "only this table"},
+					{Name: "q", In: "query", Help: "text in the column's or table's name"},
+				},
+				Unwrap: "items", Fields: []string{"projectId", "catalogId", "schema", "table", "column", "tagId", "origin", "id"}},
+			opSpec{Use: "set", Short: "Set a table's column tags as a whole: what is not given comes off (inherited tags stay)", Method: http.MethodPut,
+				Path: govPath + "/column-tags/table", Body: true,
+				Long: `  peaka gov column-tags set --catalog-id 7 --schema public --table people --tag-column ssn=PHI --tag-column email=PII
+  peaka gov column-tags set --catalog-id 7 --schema public --table people --none     # takes every tag off`,
+				Flags: []flagSpec{
+					{Name: "catalog-id", Key: "catalogId", Help: "the catalog's id (1 for Peaka tables)", Required: true},
+					{Name: "schema", Key: "schema", Help: "the schema", Required: true},
+					{Name: "table", Key: "table", Help: "the table", Required: true},
+					{Name: "tag-column", Key: "tagColumns", Kind: "strings", Help: "COLUMN=TAG (name, key or id); repeatable"},
+					{Name: "none", Key: "none", Kind: "bool", Help: "no tag on any column (takes them all off)"},
+					{Name: "reason", Help: "why"},
+				},
+				Confirm: "Set the column tags of the table: tags not given come off. Continue?",
+				Prepare: chain(projectIntoBody, tableColumnTags)},
 			opSpec{Use: "add", Short: "Put a tag on a column", Method: http.MethodPost, Path: govPath + "/column-tags", Body: true,
 				Long: "  peaka gov column-tags add --catalog-id 1 --catalog-name peaka --schema table --table patients --column ssn --tag PHI",
 				Flags: append(tableFlags(), flagSpec{Name: "column", Key: "column", Help: "the column", Required: true},
@@ -125,6 +162,12 @@ a reader no exception names gets the default; the order of exceptions does not m
 		),
 		group("table-tags", "Tags on whole tables and schemas: every column below carries them", []string{"scopes"},
 			opSpec{Use: "list", Short: "List the project's table and schema tags", Method: http.MethodGet, Path: govPath + "/table-tags",
+				Flags: []flagSpec{
+					{Name: "tag", In: "query", Help: "only this tag: name, key or id"},
+					{Name: "catalog-id", In: "query", Key: "catalogId", Help: "only this catalog"},
+					{Name: "schema", In: "query", Help: "only this schema"},
+					{Name: "table", In: "query", Help: "only this table"},
+				},
 				Prepare: projectIntoQuery, Unwrap: "items", Fields: []string{"id", "tagId", "catalogId", "schema", "table", "reason", "createdAt"}},
 			opSpec{Use: "add", Short: "Put a tag on a whole table, or on a whole schema when no table is given (202: may wait for approval)",
 				Method: http.MethodPost, Path: govPath + "/table-tags", Body: true,
@@ -146,8 +189,19 @@ is for a connected catalog: a Peaka table's schema is its own.
 				Path: govPath + "/table-tags/{id}", Args: []argSpec{{Name: "ID", Param: "id"}}, Empty: "Removed."},
 		),
 		group("row-rules", "Row rules: a condition on every read of a table, or of every table with a tagged column", []string{"row-rule", "rules"},
-			opSpec{Use: "list", Short: "List row rules", Method: http.MethodGet, Path: "/organizations/{org}/governance/row-rules",
-				Unwrap: "items", Fields: []string{"id", "name", "target.type", "target.table", "target.tagId", "enabled", "expression"}},
+			opSpec{Use: "list", Short: "List row rules (a table's with --catalog-id --schema --table, a tag's with --tag)", Method: http.MethodGet,
+				Path: "/organizations/{org}/governance/row-rules",
+				Flags: []flagSpec{
+					{Name: "project", In: "query", Key: "projectId", Help: "the table's project (its id)"},
+					{Name: "catalog-id", In: "query", Key: "catalogId", Help: "the table's catalog"},
+					{Name: "schema", In: "query", Help: "the table's schema"},
+					{Name: "table", In: "query", Help: "the table's name"},
+					{Name: "tag", In: "query", Help: "only the rules on this tag: name, key or id"},
+					{Name: "target", In: "query", Key: "targetType", Help: "TABLE or TAG"},
+					{Name: "enabled", In: "query", Help: "true or false"},
+					{Name: "q", In: "query", Help: "text in the name or the condition"},
+				},
+				Unwrap: "items", Fields: []string{"id", "name", "target.type", "target.table", "target.tagId", "enabled", "expression", "exceptions"}},
 			opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show a row rule", Method: http.MethodGet, Path: govPath + "/row-rules/{id}",
 				Args: []argSpec{{Name: "ID", Param: "id"}}},
 			opSpec{Use: "create", Short: "Write a row rule on a table or a tag", Method: http.MethodPost, Path: govPath + "/row-rules", Body: true,
@@ -161,11 +215,15 @@ is for a connected catalog: a Peaka table's schema is its own.
 					{Name: "tag", Help: "tag name or id", Resolve: resolveTag},
 					{Name: "expression", Help: "a SQL condition", Required: true},
 					{Name: "enabled", Kind: "bool", Help: "applies", Default: true},
+					{Name: "except", Key: "except", Kind: "strings", Help: "who reads every row: user:ID, group:SQL_NAME|ID or role:SQL_NAME; repeatable"},
 				},
-				Prepare: rowRuleTarget},
+				Prepare: chain(rowRuleTarget, rowRuleExceptions)},
 			opSpec{Use: "update ID", Short: "Change a row rule's name, condition or state (202: waits for approval)", Method: http.MethodPatch, Path: govPath + "/row-rules/{id}", Body: true,
 				Args:  []argSpec{{Name: "ID", Param: "id"}},
-				Flags: []flagSpec{{Name: "name", Help: "the rule's name"}, {Name: "expression", Help: "a SQL condition"}, {Name: "enabled", Kind: "bool", Help: "applies"}}},
+				Flags: []flagSpec{{Name: "name", Help: "the rule's name"}, {Name: "expression", Help: "a SQL condition"}, {Name: "enabled", Kind: "bool", Help: "applies"},
+					{Name: "except", Key: "except", Kind: "strings", Help: "who reads every row (replaces them all): user:ID, group:SQL_NAME|ID or role:SQL_NAME; repeatable"},
+					{Name: "no-exceptions", Key: "noExceptions", Kind: "bool", Help: "take every exception off"}},
+				Prepare: rowRuleExceptions},
 			opSpec{Use: "delete ID", Short: "Delete a row rule (202: waits for approval)", Method: http.MethodDelete, Path: govPath + "/row-rules/{id}",
 				Args: []argSpec{{Name: "ID", Param: "id"}}, Confirm: "Delete row rule {0}?", Empty: "Deleted."},
 		),
@@ -182,6 +240,45 @@ classifications that cannot be read, materialized queries that would be refused,
 				Method: http.MethodGet, Path: govPath + "/audit-events", Query: true, Unwrap: "items",
 				Fields: []string{"occurredAt", "kind", "actor", "subject.tag", "subject.table", "subject.column", "reason"}},
 			opSpec{Use: "export", Short: "Decision records and policy changes as NDJSON (-f since=… -f until=…)", Method: http.MethodGet, Path: govPath + "/audit-events/export", Query: true},
+		),
+		group("suggestions", "Suggested column tags: a member suggests, a governance administrator approves or rejects", []string{"suggestion", "suggest"},
+			opSpec{Use: "list", Short: "Suggested tags, newest first (--status APPROVED|REJECTED|WITHDRAWN|ALL; pending by default)", Method: http.MethodGet,
+				Path: govPath + "/tag-suggestions",
+				Flags: []flagSpec{
+					{Name: "status", In: "query", Help: "PENDING (default), APPROVED, REJECTED, WITHDRAWN or ALL"},
+					{Name: "project", In: "query", Key: "projectId", Help: "only this project's (its id)"},
+					{Name: "tag", In: "query", Help: "only this tag: name, key or id"},
+					{Name: "source", In: "query", Key: "sourceId", Help: "only this classification source's (its id)"},
+					{Name: "q", In: "query", Help: "text in the table's or column's name"},
+					{Name: "order", In: "query", Help: "newest (default) or project"},
+				},
+				Unwrap: "items", Fields: []string{"id", "schema", "table", "column", "tag", "source", "status", "suggestedBy", "createdAt"}},
+			opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "Show a suggestion", Method: http.MethodGet, Path: govPath + "/tag-suggestions/{id}",
+				Args: []argSpec{{Name: "ID", Param: "id"}}},
+			opSpec{Use: "create", Short: "Suggest a tag for a column; it waits until a governance administrator approves it", Method: http.MethodPost,
+				Path: govPath + "/tag-suggestions", Body: true,
+				Long: "  peaka gov suggestions create --catalog-id 7 --schema public --table people --column ssn --tag PII --reason \"holds SSNs\"",
+				Flags: []flagSpec{
+					{Name: "catalog-id", Key: "catalogId", Help: "the catalog's id (1 for Peaka tables)", Required: true},
+					{Name: "schema", Key: "schema", Help: "the schema", Required: true},
+					{Name: "table", Key: "table", Help: "the table", Required: true},
+					{Name: "column", Key: "column", Help: "the column", Required: true},
+					{Name: "tag", Key: "tagId", Help: "the tag: name, key or id", Required: true},
+					{Name: "reason", Help: "why; the administrator reads it"},
+				},
+				Prepare: projectIntoBody},
+			opSpec{Use: "approve ID", Short: "Put the suggested tag on (202: waits for a second administrator)", Method: http.MethodPost,
+				Path: govPath + "/tag-suggestions/{id}/approve", Body: true, Args: []argSpec{{Name: "ID", Param: "id"}},
+				Flags: []flagSpec{{Name: "note", Key: "reason", Help: "kept with the decision"}}},
+			opSpec{Use: "reject ID", Short: "Refuse a suggestion; it does not come back", Method: http.MethodPost,
+				Path: govPath + "/tag-suggestions/{id}/reject", Body: true, Args: []argSpec{{Name: "ID", Param: "id"}},
+				Flags: []flagSpec{{Name: "note", Key: "reason", Help: "kept with the decision"}}},
+			opSpec{Use: "approve-many", Short: "Approve many: --id (repeatable), or every pending one matching the filter flags", Method: http.MethodPost,
+				Path: govPath + "/tag-suggestions/approve", Body: true, Flags: manySuggestionFlags(), Prepare: manySuggestions,
+				Unwrap: "outcomes", Fields: []string{"id", "outcome", "changeRequestId", "message"}},
+			opSpec{Use: "reject-many", Short: "Reject many: --id (repeatable), or every pending one matching the filter flags", Method: http.MethodPost,
+				Path: govPath + "/tag-suggestions/reject", Body: true, Flags: manySuggestionFlags(), Prepare: manySuggestions,
+				Unwrap: "outcomes", Fields: []string{"id", "outcome", "message"}},
 		),
 		group("changes", "Changes waiting for a second administrator", []string{"change-requests", "approvals"},
 			opSpec{Use: "list", Short: "Changes waiting for approval (-f status=ALL for every one)", Method: http.MethodGet, Path: govPath + "/change-requests",
@@ -296,6 +393,11 @@ func listAt(r *Runtime, path string) ([]record, error) {
 
 // resolveTag: a tag's id or name.
 func resolveTag(r *Runtime, ref string, params map[string]string) error {
+	// An id is taken as it is: the API says when no tag has it, without the organization's tags read first.
+	if uuidRE.MatchString(strings.TrimSpace(ref)) {
+		params["tag"] = strings.TrimSpace(ref)
+		return nil
+	}
 	org, err := r.orgID()
 	if err != nil {
 		return err
@@ -450,6 +552,100 @@ func rowRuleTarget(c *callCtx) error {
 		c.Body["target"] = map[string]any{"type": "table", "projectId": p, "table": table}
 	default:
 		return usage("name what the rule is on: --table or --tag")
+	}
+	return nil
+}
+
+// tableColumnTags: --tag-column COLUMN=TAG pairs (tags by name, key or id) as the body's columns; --none for none.
+func tableColumnTags(c *callCtx) error {
+	pairs, _ := c.Body["tagColumns"].([]string)
+	none, _ := c.Body["none"].(bool)
+	delete(c.Body, "tagColumns")
+	delete(c.Body, "none")
+	if none && len(pairs) > 0 {
+		return usage("--none takes every tag off; it does not go with --tag-column")
+	}
+	if !none && len(pairs) == 0 {
+		return usage("give the columns' tags with --tag-column COLUMN=TAG, or --none to take them all off")
+	}
+	columns := []map[string]any{}
+	for _, p := range pairs {
+		column, tag, ok := strings.Cut(p, "=")
+		if !ok || strings.TrimSpace(column) == "" || strings.TrimSpace(tag) == "" {
+			return usage("--tag-column is COLUMN=TAG, not %q", p)
+		}
+		found := map[string]string{}
+		if err := resolveTag(rt, strings.TrimSpace(tag), found); err != nil {
+			return err
+		}
+		columns = append(columns, map[string]any{"column": strings.TrimSpace(column), "tagId": found["tag"]})
+	}
+	c.Body["columns"] = columns
+	return nil
+}
+
+// rowRuleExceptions: --except WHO:ID pairs as the rule's exceptions; --no-exceptions for none; neither keeps them.
+func rowRuleExceptions(c *callCtx) error {
+	asked, _ := c.Body["except"].([]string)
+	none, _ := c.Body["noExceptions"].(bool)
+	delete(c.Body, "except")
+	delete(c.Body, "noExceptions")
+	if none && len(asked) > 0 {
+		return usage("--no-exceptions takes them all off; it does not go with --except")
+	}
+	if none {
+		c.Body["exceptions"] = []any{}
+		return nil
+	}
+	if len(asked) == 0 {
+		return nil
+	}
+	out := []any{}
+	for _, e := range asked {
+		kind, id, ok := strings.Cut(e, ":")
+		kind = strings.ToLower(strings.TrimSpace(kind))
+		if !ok || strings.TrimSpace(id) == "" || (kind != "user" && kind != "group" && kind != "role") {
+			return usage("--except is user:ID, group:SQL_NAME|ID or role:SQL_NAME, not %q", e)
+		}
+		out = append(out, map[string]any{"subject": map[string]any{"type": kind, "id": strings.TrimSpace(id)}})
+	}
+	c.Body["exceptions"] = out
+	return nil
+}
+
+func manySuggestionFlags() []flagSpec {
+	return []flagSpec{
+		{Name: "id", Key: "ids", Kind: "strings", Help: "a suggestion's id; repeatable (up to 500)"},
+		{Name: "project", Key: "fProject", Help: "every pending one of this project (its id)"},
+		{Name: "tag", Key: "fTag", Help: "every pending one of this tag: name, key or id"},
+		{Name: "source", Key: "fSource", Help: "every pending one of this classification source (its id)"},
+		{Name: "q", Key: "fQ", Help: "every pending one whose table or column name holds this"},
+		{Name: "limit", Key: "limit", Kind: "int", Help: "how many a filter decides in one call (default 100, at most 500)"},
+		{Name: "note", Help: "kept with each decision"},
+	}
+}
+
+// manySuggestions: ids, or a filter, as the body of a decision on many suggestions.
+func manySuggestions(c *callCtx) error {
+	filter := map[string]any{}
+	for flag, key := range map[string]string{"fProject": "projectId", "fTag": "tagId", "fSource": "sourceId", "fQ": "q"} {
+		if v, ok := c.Body[flag].(string); ok && v != "" {
+			filter[key] = v
+		}
+		delete(c.Body, flag)
+	}
+	ids, _ := c.Body["ids"].([]string)
+	switch {
+	case len(ids) > 0 && len(filter) > 0:
+		return usage("name the suggestions by --id or by filter flags, not both")
+	case len(ids) == 0 && len(filter) == 0:
+		return usage("name the suggestions: --id, or --project / --tag / --source / --q")
+	case len(filter) > 0:
+		delete(c.Body, "ids")
+		c.Body["filter"] = filter
+	}
+	if v, ok := c.Body["limit"].(int); ok && v == 0 {
+		delete(c.Body, "limit")
 	}
 	return nil
 }
