@@ -443,3 +443,61 @@ func TestLogsAreNotWalkedWhole(t *testing.T) {
 		t.Fatal("decisions and the audit log are read a page at a time; other lists whole")
 	}
 }
+
+// Round 3 (DEV-4250): policy, access reviews, publication requests.
+func TestRoundThreeCommands(t *testing.T) {
+	gov := newGovernanceCmd()
+	for _, c := range []struct {
+		path  []string
+		flags []string
+	}{
+		{[]string{"policy", "show"}, nil},
+		{[]string{"policy", "templates"}, nil},
+		{[]string{"policy", "diff"}, nil},
+		{[]string{"policy", "use"}, []string{"reason"}},
+		{[]string{"policy", "set"}, []string{"change", "reason"}},
+		{[]string{"policy", "history"}, nil},
+		{[]string{"policy", "proposals"}, nil},
+		{[]string{"policy", "approve"}, []string{"reason"}},
+		{[]string{"policy", "reject"}, []string{"reason"}},
+		{[]string{"policy", "unlock"}, []string{"reason"}},
+		{[]string{"reviews", "start"}, nil},
+		{[]string{"reviews", "decide"}, []string{"decision", "note"}},
+		{[]string{"reviews", "close"}, nil},
+		{[]string{"reviews", "export"}, nil},
+		{[]string{"publications", "list"}, nil},
+		{[]string{"publications", "approve"}, []string{"reason"}},
+		{[]string{"publications", "revoke"}, nil},
+	} {
+		cmd, _, err := gov.Find(c.path)
+		if err != nil || cmd.Name() != c.path[len(c.path)-1] {
+			t.Fatalf("%v: %v", c.path, err)
+		}
+		for _, f := range c.flags {
+			if cmd.Flags().Lookup(f) == nil {
+				t.Errorf("%v has no --%s", c.path, f)
+			}
+		}
+	}
+	policy, _, _ := gov.Find([]string{"policy"})
+	if policy.RunE == nil {
+		t.Error("`gov policy` alone still shows the policy")
+	}
+}
+
+func TestPolicyFields(t *testing.T) {
+	c := &callCtx{Body: map[string]any{"fieldPairs": []string{"untaggedColumn=DENY", "auditRetentionDays=400", "nativeQueryOnTaggedCatalog=ALLOW", "x=true"}}}
+	if err := policyFields(c); err != nil {
+		t.Fatal(err)
+	}
+	f := c.Body["fields"].(map[string]any)
+	if f["untaggedColumn"] != "DENY" || f["auditRetentionDays"] != float64(400) || f["x"] != true || c.Body["fieldPairs"] != nil {
+		t.Fatalf("fields: %v", f)
+	}
+	if err := policyFields(&callCtx{Body: map[string]any{"fieldPairs": []string{"novalue"}}}); err == nil {
+		t.Error("a pair without = is refused")
+	}
+	if err := policyFields(&callCtx{Body: map[string]any{}}); err == nil {
+		t.Error("no field is refused")
+	}
+}

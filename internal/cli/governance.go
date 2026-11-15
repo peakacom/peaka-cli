@@ -239,7 +239,52 @@ is for a connected catalog: a Peaka table's schema is its own.
 			opSpec{Use: "delete ID", Short: "Delete a row rule (202: waits for approval)", Method: http.MethodDelete, Path: govPath + "/row-rules/{id}",
 				Args: []argSpec{{Name: "ID", Param: "id"}}, Confirm: "Delete row rule {0}?", Empty: "Deleted."},
 		),
-		opSpec{Use: "policy", Short: "Show the organization's governance policy", Method: http.MethodGet, Path: govPath + "/policy"}.command(),
+		group("policy", "The organization's governance policy: show it, take a template, change fields, proposals, history", nil,
+			opSpec{Use: "show", Aliases: []string{"get", "describe"}, Short: "Show the policy", Method: http.MethodGet, Path: govPath + "/policy"},
+			opSpec{Use: "templates", Short: "The built-in templates and the field catalog", Method: http.MethodGet, Path: govPath + "/policy/templates"},
+			opSpec{Use: "diff TEMPLATE", Short: "Where the policy differs from a template", Method: http.MethodGet, Path: govPath + "/policy/templates/{t}/diff",
+				Args: []argSpec{{Name: "TEMPLATE", Param: "t"}}},
+			opSpec{Use: "use TEMPLATE", Short: "Take a template's values (202: a proposal waits for approval)", Method: http.MethodPut, Path: govPath + "/policy/template",
+				Body: true, Args: []argSpec{{Name: "TEMPLATE", Param: "template"}}, Flags: []flagSpec{{Name: "reason", Help: "why"}},
+				Prepare: paramsIntoBody("template", "template"), Confirm: "Replace the policy's values with template {0}?"},
+			opSpec{Use: "set", Short: "Change fields: --change untaggedColumn=DENY (202: a proposal waits for approval)", Method: http.MethodPatch,
+				Path: govPath + "/policy", Body: true,
+				Flags: []flagSpec{{Name: "change", Key: "fieldPairs", Kind: "strings", Help: "NAME=VALUE (camelCase, as `policy show` names it); repeatable", Required: true},
+					{Name: "reason", Help: "why"}},
+				Prepare: policyFields},
+			opSpec{Use: "history", Short: "Every change of the policy, newest first", Method: http.MethodGet, Path: govPath + "/policy/history",
+				Unwrap: "items", Fields: []string{"createdAt", "actor", "fromVersion", "toVersion", "direction", "reason"}},
+			opSpec{Use: "proposals", Short: "Policy changes waiting for approval (-f status=ALL for every one)", Method: http.MethodGet,
+				Path: govPath + "/policy/proposals", Query: true, Unwrap: "items", Fields: []string{"proposal.id", "proposal.direction", "proposal.proposedBy", "stale"}},
+			opSpec{Use: "approve PROPOSAL", Short: "Apply a proposal another administrator made", Method: http.MethodPost, Path: govPath + "/policy/proposals/{id}/approve",
+				Body: true, Args: []argSpec{{Name: "PROPOSAL", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why"}}},
+			opSpec{Use: "reject PROPOSAL", Short: "Refuse a proposal", Method: http.MethodPost, Path: govPath + "/policy/proposals/{id}/reject",
+				Body: true, Args: []argSpec{{Name: "PROPOSAL", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why"}}},
+			opSpec{Use: "unlock", Short: "Unlock a locked policy (the organization's owner only)", Method: http.MethodPost, Path: govPath + "/policy/unlock", Body: true,
+				Flags: []flagSpec{{Name: "reason", Help: "why", Required: true}}, Confirm: "Unlock the organization's governance policy?"},
+		),
+		group("reviews", "Access reviews: a round in which every rule and reader of classified data is confirmed, removed or flagged", []string{"access-reviews"},
+			opSpec{Use: "list", Short: "Review rounds, newest first", Method: http.MethodGet, Path: govPath + "/access-reviews",
+				Unwrap: "items", Fields: []string{"id", "status", "startedBy", "startedAt", "closedAt"}},
+			opSpec{Use: "start", Short: "Open a review round", Method: http.MethodPost, Path: govPath + "/access-reviews", Confirm: "Open an access review round?"},
+			opSpec{Use: "describe ID", Aliases: []string{"get"}, Short: "A round and its items", Method: http.MethodGet, Path: govPath + "/access-reviews/{id}",
+				Args: []argSpec{{Name: "ID", Param: "id"}}, Unwrap: "items", Fields: []string{"id", "kind", "summary", "decision", "decidedBy"}},
+			opSpec{Use: "decide ID ITEM", Short: "Decide an item: --decision CONFIRMED|REMOVED|FLAGGED|PENDING", Method: http.MethodPost,
+				Path: govPath + "/access-reviews/{id}/items/{item}/decision", Body: true, Args: []argSpec{{Name: "ID", Param: "id"}, {Name: "ITEM", Param: "item"}},
+				Flags: []flagSpec{{Name: "decision", Help: "CONFIRMED, REMOVED (a rule: deleted), FLAGGED or PENDING", Required: true}, {Name: "note", Help: "why"}}},
+			opSpec{Use: "close ID", Short: "End a round", Method: http.MethodPost, Path: govPath + "/access-reviews/{id}/close", Args: []argSpec{{Name: "ID", Param: "id"}}},
+			opSpec{Use: "export ID", Short: "A round as CSV", Method: http.MethodGet, Path: govPath + "/access-reviews/{id}/export", Args: []argSpec{{Name: "ID", Param: "id"}}},
+		),
+		group("publications", "Requests to publish a query that runs with its author's access", []string{"publication-requests"},
+			opSpec{Use: "list", Short: "Requests, newest first (-f status=ALL for every one; PENDING by default)", Method: http.MethodGet,
+				Path: govPath + "/publication-requests", Query: true, Unwrap: "items", Fields: []string{"id", "objectName", "requestedBy", "status", "createdAt"}},
+			opSpec{Use: "approve ID", Short: "Let the query run with its author's access", Method: http.MethodPost, Path: govPath + "/publication-requests/{id}/approve",
+				Body: true, Args: []argSpec{{Name: "ID", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why"}}},
+			opSpec{Use: "reject ID", Short: "Refuse a request", Method: http.MethodPost, Path: govPath + "/publication-requests/{id}/reject",
+				Body: true, Args: []argSpec{{Name: "ID", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why"}}},
+			opSpec{Use: "revoke ID", Short: "An approved publication runs with its reader's access again", Method: http.MethodDelete,
+				Path: govPath + "/publication-requests/{id}", Args: []argSpec{{Name: "ID", Param: "id"}}, Confirm: "Revoke publication {0}?"},
+		),
 		opSpec{Use: "impact", Short: "What turning classification enforcement on would change (-f projectId=… for one project)",
 			Long: `Read from metadata alone: untagged columns per table, tables refused for having classified columns and no row rule,
 classifications that cannot be read, materialized queries that would be refused, declassifications that lift every path.
@@ -413,6 +458,13 @@ classifications that cannot be read, materialized queries that would be refused,
 		),
 		newGovernanceApplyCmd(),
 	)
+	// `peaka gov policy` alone shows the policy, as it did before it had subcommands.
+	if policy, _, err := cmd.Find([]string{"policy"}); err == nil && policy.Name() == "policy" {
+		if show, _, err := policy.Find([]string{"show"}); err == nil && show.Name() == "show" {
+			policy.RunE = show.RunE
+			policy.Args = cobra.NoArgs
+		}
+	}
 	return cmd
 }
 
@@ -768,6 +820,30 @@ func manySuggestions(c *callCtx) error {
 	if v, ok := c.Body["limit"].(int); ok && v == 0 {
 		delete(c.Body, "limit")
 	}
+	return nil
+}
+
+// policyFields: --field NAME=VALUE pairs as the body's fields (true/false and numbers as such).
+func policyFields(c *callCtx) error {
+	pairs, _ := c.Body["fieldPairs"].([]string)
+	delete(c.Body, "fieldPairs")
+	fields := map[string]any{}
+	for _, p := range pairs {
+		k, v, ok := strings.Cut(p, "=")
+		if !ok || strings.TrimSpace(k) == "" {
+			return usage("--change is NAME=VALUE, not %q", p)
+		}
+		var parsed any
+		if err := json.Unmarshal([]byte(v), &parsed); err == nil {
+			fields[strings.TrimSpace(k)] = parsed
+		} else {
+			fields[strings.TrimSpace(k)] = v
+		}
+	}
+	if len(fields) == 0 {
+		return usage("name a field to change: --change NAME=VALUE")
+	}
+	c.Body["fields"] = fields
 	return nil
 }
 
