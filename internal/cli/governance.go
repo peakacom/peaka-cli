@@ -44,7 +44,7 @@ func newGovernanceCmd() *cobra.Command {
 				Flags: []flagSpec{
 					{Name: "name", Help: "the tag's name, unique in the organization", Required: true},
 					{Name: "description", Help: "what it classifies"},
-					{Name: "active", Kind: "bool", Help: "masks while active", Default: true},
+					{Name: "active", Kind: "bool", Help: "in use: an inactive tag classifies nothing", Default: true},
 					{Name: "key", Help: "a stable key (lowercase letters, digits, _ . -); derived from the name when not given; never changes"},
 					{Name: "parent", Help: "the tag above it in the organization's tree: name, key or id", Resolve: resolveParent},
 					{Name: "sensitivity", Help: "PUBLIC, INTERNAL, CONFIDENTIAL or RESTRICTED; the organization's default when not given"},
@@ -55,7 +55,7 @@ func newGovernanceCmd() *cobra.Command {
 				Flags: []flagSpec{
 					{Name: "name", Help: "the tag's name"},
 					{Name: "description", Help: "what it classifies"},
-					{Name: "active", Kind: "bool", Help: "masks while active"},
+					{Name: "active", Kind: "bool", Help: "in use: an inactive tag classifies nothing"},
 					{Name: "parent", Help: "the tag above it: name, key or id; none makes it a root", Resolve: resolveParent},
 					{Name: "sensitivity", Help: "PUBLIC, INTERNAL, CONFIDENTIAL or RESTRICTED; none for the organization's default"},
 					{Name: "status", Help: "ACTIVE, or DEPRECATED (no new assignment; columns that have it keep it)"},
@@ -213,6 +213,16 @@ is for a connected catalog: a Peaka table's schema is its own.
 					{Name: "table", In: "query", Help: "the table", Required: true},
 				},
 				Prepare: projectIntoQuery},
+			opSpec{Use: "preview", Short: "How many rows a member would read with a condition; nothing is saved", Method: http.MethodPost,
+				Path: govPath + "/row-rules/preview", Body: true,
+				Long: "  peaka gov row-rules preview --table peaka.table.orders --expression \"region = current_user_props('region')\" --as ana@example.com",
+				Flags: []flagSpec{
+					{Name: "table", Help: "catalog.schema.table, as the project's SQL names it", Required: true},
+					{Name: "expression", Help: "the SQL condition to try", Required: true},
+					{Name: "as", Help: "the member to read as: id or email", Required: true, Resolve: resolveMember},
+					{Name: "rule", Key: "ruleId", Help: "the rule being changed (its id): left out of the rules already on the table"},
+				},
+				Prepare: chain(projectIntoBody, paramsIntoBody("user", "userId"))},
 			opSpec{Use: "problems", Short: "Rules on a tag whose condition does not hold on a column the tag reaches", Method: http.MethodGet,
 				Path: govPath + "/row-rules/problems", Unwrap: "items",
 				Fields: []string{"ruleName", "sqlName", "column", "detail", "foundAt"}},
@@ -231,7 +241,7 @@ is for a connected catalog: a Peaka table's schema is its own.
 				},
 				Prepare: chain(rowRuleTarget, rowRuleExceptions)},
 			opSpec{Use: "update ID", Short: "Change a row rule's name, condition or state (202: waits for approval)", Method: http.MethodPatch, Path: govPath + "/row-rules/{id}", Body: true,
-				Args:  []argSpec{{Name: "ID", Param: "id"}},
+				Args: []argSpec{{Name: "ID", Param: "id"}},
 				Flags: []flagSpec{{Name: "name", Help: "the rule's name"}, {Name: "expression", Help: "a SQL condition"}, {Name: "enabled", Kind: "bool", Help: "applies"},
 					{Name: "except", Key: "except", Kind: "strings", Help: "who reads every row (replaces them all): user:ID, group:SQL_NAME|ID or role:SQL_NAME; repeatable"},
 					{Name: "no-exceptions", Key: "noExceptions", Kind: "bool", Help: "take every exception off"}},
@@ -293,8 +303,21 @@ classifications that cannot be read, materialized queries that would be refused,
   peaka gov impact -f projectId=OtnUT0en`,
 			Method: http.MethodGet, Path: govPath + "/enforcement-impact", Query: true}.command(),
 		group("audit", "The organization's audit log", nil,
-			opSpec{Use: "events", Short: "Classification changes, newest first (-f kind=TAG_APPLIED,ROW_RULE_CREATED -f since=… -f cursor=…)",
+			opSpec{Use: "events", Short: "Changes to classification, rules and the policy, newest first",
+				Long: `  peaka gov audit events --kind TAG_APPLIED,ROW_RULE_CREATED --since 2026-11-01T00:00:00Z
+  peaka gov audit events --actor ana@example.com --table charges`,
 				Method: http.MethodGet, Path: govPath + "/audit-events", Query: true, Unwrap: "items",
+				Flags: []flagSpec{
+					{Name: "kind", In: "query", Help: "event kinds, comma-separated"},
+					{Name: "actor", In: "query", Help: "who made the change"},
+					{Name: "project", In: "query", Key: "projectId", Help: "a project's (its id)"},
+					{Name: "table", In: "query", Help: "a table's"},
+					{Name: "column", In: "query", Help: "a column's"},
+					{Name: "since", In: "query", Help: "ISO-8601 instant"},
+					{Name: "before", In: "query", Help: "ISO-8601 instant"},
+					{Name: "limit", In: "query", Kind: "int", Help: "records a page (at most 500)"},
+					{Name: "cursor", In: "query", Help: "the page after: the cursor the page before names on stderr"},
+				},
 				Fields: []string{"occurredAt", "kind", "actor", "subject.tag", "subject.table", "subject.column", "reason"}},
 			opSpec{Use: "export", Short: "Decision records and policy changes as NDJSON (-f since=… -f until=…)", Method: http.MethodGet, Path: govPath + "/audit-events/export", Query: true},
 		),
@@ -323,7 +346,7 @@ classifications that cannot be read, materialized queries that would be refused,
 					{Name: "tag", Key: "tagId", Help: "the tag: name, key or id", Required: true},
 					{Name: "reason", Help: "why; the administrator reads it"},
 				},
-				Prepare: projectIntoBody},
+				Prepare: chain(projectIntoBody, suggestedTag), Waits: true},
 			opSpec{Use: "approve ID", Short: "Put the suggested tag on (202: waits for a second administrator)", Method: http.MethodPost,
 				Path: govPath + "/tag-suggestions/{id}/approve", Body: true, Args: []argSpec{{Name: "ID", Param: "id"}},
 				Flags: []flagSpec{{Name: "note", Key: "reason", Help: "kept with the decision"}}},
@@ -415,19 +438,19 @@ classifications that cannot be read, materialized queries that would be refused,
 		),
 		group("access", "Who reads what: a column's readers, a member's view, exposure, recent readers", nil,
 			opSpec{Use: "column", Short: "Every member and what each sees of a column", Method: http.MethodGet, Path: govPath + "/access/columns",
-				Long: "  peaka gov access column --catalog-id 7 --schema public --table people --column ssn",
-				Flags: append(columnQueryFlags(), flagSpec{Name: "limit", In: "query", Kind: "int", Help: "members a page"}),
+				Long:    "  peaka gov access column --catalog-id 7 --schema public --table people --column ssn",
+				Flags:   append(columnQueryFlags(), flagSpec{Name: "limit", In: "query", Kind: "int", Help: "members a page"}),
 				Prepare: projectIntoQuery, Unwrap: "members", Fields: []string{"member.email", "effect", "code", "rule"}},
 			opSpec{Use: "holders", Short: "The rules that unmask a column and whom each names", Method: http.MethodGet, Path: govPath + "/access/columns/holders",
 				Flags: columnQueryFlags(), Prepare: projectIntoQuery, Unwrap: "holders", Fields: []string{"kind", "name", "tag", "policy", "mask", "members"}},
-			opSpec{Use: "member USER_ID", Short: "What a member sees of every classified column", Method: http.MethodGet, Path: govPath + "/access/members/{user}",
-				Args: []argSpec{{Name: "USER_ID", Param: "user"}}, Unwrap: "rows", Fields: []string{"table.sqlName", "column", "effect", "rule"}},
+			opSpec{Use: "member MEMBER", Short: "What a member sees of every classified column (MEMBER: id or email)", Method: http.MethodGet, Path: govPath + "/access/members/{user}",
+				Args: []argSpec{{Name: "USER_ID", Resolve: resolveMember}}, Unwrap: "rows", Fields: []string{"table.sqlName", "column", "effect", "rule"}},
 			opSpec{Use: "exposure BY", Short: "How far classified data reaches: BY is tags, columns or members", Method: http.MethodGet, Path: govPath + "/access/exposure/{by}",
-				Args: []argSpec{{Name: "BY", Param: "by"}},
-				Flags: []flagSpec{{Name: "q", In: "query", Help: "search"}, {Name: "tag", In: "query", Help: "columns of this tag (name, key or id)"}},
+				Args:   []argSpec{{Name: "BY", Param: "by"}},
+				Flags:  []flagSpec{{Name: "q", In: "query", Help: "search"}, {Name: "tag", In: "query", Help: "columns of this tag (name, key or id)"}},
 				Unwrap: "items"},
 			opSpec{Use: "readers", Short: "Who read a tag's columns lately, and how", Method: http.MethodGet, Path: govPath + "/access/readers",
-				Flags: []flagSpec{{Name: "tag", In: "query", Help: "the tag: name, key or id", Required: true}, {Name: "days", In: "query", Kind: "int", Help: "how far back (90; at most 365)"}},
+				Flags:  []flagSpec{{Name: "tag", In: "query", Help: "the tag: name, key or id", Required: true}, {Name: "days", In: "query", Kind: "int", Help: "how far back (90; at most 365)"}},
 				Unwrap: "items"},
 		),
 		opSpec{Use: "decisions", Short: "What was decided on each read, newest first", Method: http.MethodGet, Path: govPath + "/decisions",
@@ -440,7 +463,7 @@ classifications that cannot be read, materialized queries that would be refused,
 				{Name: "schema", In: "query", Help: "the table's schema"},
 				{Name: "table", In: "query", Help: "the table"},
 				{Name: "denied", In: "query", Kind: "bool", Help: "only refused reads"},
-				{Name: "tag", In: "query", Help: "reads deciding this tag"},
+				{Name: "tag", In: "query", Help: "reads deciding this tag: name, key or id"},
 				{Name: "since", In: "query", Help: "ISO-8601 instant"},
 				{Name: "limit", In: "query", Kind: "int", Help: "records a page (at most 500)"},
 				{Name: "cursor", In: "query", Help: "the page after: the cursor the page before names on stderr"},
@@ -457,6 +480,7 @@ classifications that cannot be read, materialized queries that would be refused,
 				Body: true, Args: []argSpec{{Name: "ID", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why; kept in the Audit log"}}},
 		),
 		newGovernanceApplyCmd(),
+		newAttributesCmd(),
 	)
 	// `peaka gov policy` alone shows the policy, as it did before it had subcommands.
 	if policy, _, err := cmd.Find([]string{"policy"}); err == nil && policy.Name() == "policy" {
@@ -477,6 +501,10 @@ func newGroupsCmd() *cobra.Command {
 			Flags: []flagSpec{{Name: "name", Help: "the group's name", Required: true}, {Name: "description", Help: "who is in it"}}},
 		opSpec{Use: "delete GROUP", Short: "Delete a group", Method: http.MethodDelete, Path: "/organizations/{org}/groups/{group}",
 			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}}, Confirm: "Delete group {0}?", Empty: "Deleted."},
+		opSpec{Use: "set-sql-name GROUP SQL_NAME", Short: "Set how SQL names the group (current_user_groups(), a row rule's exception)", Method: http.MethodPut,
+			Path: "/organizations/{org}/groups/{group}/sql-name", Body: true,
+			Args:    []argSpec{{Name: "GROUP", Resolve: resolveGroup}, {Name: "SQL_NAME", Param: "sqlName"}},
+			Prepare: paramsIntoBody("sqlName", "sqlName"), Confirm: "Rename group {0} in SQL to {1}? Row rules and saved queries that quote the old name are not rewritten."},
 		opSpec{Use: "members GROUP", Short: "List a group's members", Method: http.MethodGet, Path: "/organizations/{org}/groups/{group}/members",
 			Args: []argSpec{{Name: "GROUP", Resolve: resolveGroup}}, Unwrap: "items", Fields: []string{"userId", "email", "firstName", "lastName", "kind"}},
 		opSpec{Use: "add-member GROUP USER_ID", Short: "Add a member to a group (a member already in it stays)", Method: http.MethodPut, Path: "/organizations/{org}/groups/{group}/members/{user}",
@@ -876,6 +904,21 @@ func declassifySources(c *callCtx) error {
 	return nil
 }
 
+// suggestedTag: the suggested tag by name, key or id, looked up here: one who only suggests reads the tags a page
+// at a time, which is what the lookup does.
+func suggestedTag(c *callCtx) error {
+	ref, _ := c.Body["tagId"].(string)
+	if strings.TrimSpace(ref) == "" {
+		return nil
+	}
+	found := map[string]string{}
+	if err := resolveTag(rt, ref, found); err != nil {
+		return err
+	}
+	c.Body["tagId"] = found["tag"]
+	return nil
+}
+
 // projectIntoBody: the project in context, for routes that take it in the body.
 func projectIntoBody(c *callCtx) error {
 	p, err := rt.needProject()
@@ -1068,21 +1111,47 @@ func parseException(s string) (kind, who, mask, scope string, err error) {
 
 // ==================== apply ====================
 
-// govFile is what `governance apply` reads: the tags and row rules an organization should have.
+// govFile is what `governance apply` reads: what an organization's governance should hold.
 type govFile struct {
 	Tags []struct {
 		Name        string   `yaml:"name"`
 		Label       string   `yaml:"label"` // the older word for name
-		Description string   `yaml:"description"`
+		Description *string  `yaml:"description"`
 		Active      *bool    `yaml:"active"`
+		Key         string   `yaml:"key"`
+		Parent      *string  `yaml:"parent"`
+		Sensitivity *string  `yaml:"sensitivity"`
+		Status      string   `yaml:"status"`
 		Rules       []string `yaml:"rules"` // refused: masking is a masking policy now
 	} `yaml:"tags"`
+	Masks []struct {
+		Name        string  `yaml:"name"`
+		Expression  string  `yaml:"expression"`
+		Description *string `yaml:"description"`
+	} `yaml:"masks"`
+	MaskingPolicies []struct {
+		Name       string    `yaml:"name"`
+		Tag        string    `yaml:"tag"`
+		Default    *string   `yaml:"default"`
+		Enabled    *bool     `yaml:"enabled"`
+		Exceptions *[]string `yaml:"exceptions"`
+	} `yaml:"maskingPolicies"`
+	TableTags []struct {
+		CatalogID   string `yaml:"catalogId"`
+		CatalogName string `yaml:"catalogName"`
+		Catalog     string `yaml:"catalog"`
+		Schema      string `yaml:"schema"`
+		Table       string `yaml:"table"`
+		Tag         string `yaml:"tag"`
+		Reason      string `yaml:"reason"`
+	} `yaml:"tableTags"`
 	RowRules []struct {
-		Name       string `yaml:"name"`
-		Table      string `yaml:"table"`
-		Tag        string `yaml:"tag"`
-		Expression string `yaml:"expression"`
-		Enabled    *bool  `yaml:"enabled"`
+		Name       string    `yaml:"name"`
+		Table      string    `yaml:"table"`
+		Tag        string    `yaml:"tag"`
+		Expression string    `yaml:"expression"`
+		Enabled    *bool     `yaml:"enabled"`
+		Except     *[]string `yaml:"except"`
 	} `yaml:"rowRules"`
 	ColumnTags []struct {
 		CatalogID   string `yaml:"catalogId"`
@@ -1100,21 +1169,25 @@ func newGovernanceApplyCmd() *cobra.Command {
 	var file string
 	cmd := &cobra.Command{
 		Use:   "apply -f FILE",
-		Short: "Make the organization's tags, row rules and column tags what a YAML file says",
-		Long: `Creates what is missing and updates what differs, by tag name and row rule name; a column tag already there is
-left as it is; nothing is deleted. Tags come first, then column tags, then row rules (a rule on a tag needs a
-tagged column).
-A change that reveals classified data may wait for a second administrator (202): it is reported, not retried.
+		Short: "Make the organization's tags, masks, masking policies, table and column tags and row rules what a YAML file says",
+		Long: `Creates what is missing and changes what differs, by name; what the file does not say stays as it is (a tag
+without a description keeps its own), what is already as the file says is left alone, and nothing is deleted.
+Tags come first (a parent before its children), then masks, masking policies, table tags, column tags and row rules.
+A change that waits for a second administrator (202) is reported, not retried.
 
   tags:
-    - name: PHI
-      description: Protected health information
-  rowRules:
-    - name: Own region
-      tag: REGION
-      expression: "{col} = current_user_props('region')"
+    - {name: Personal}
+    - {name: PHI, parent: Personal, sensitivity: RESTRICTED, description: Protected health information}
+  masks:
+    - {name: Last four, expression: "concat('***', substr({col}, -4))"}
+  maskingPolicies:
+    - {name: PHI readers, tag: PHI, default: nullify, exceptions: ["group:Clinicians=unmasked"]}
+  tableTags:
+    - {catalogId: "7", schema: hr, tag: Personal}
   columnTags:
     - {catalogId: "1", catalog: peaka, schema: table, table: patients, column: ssn, tag: PHI}
+  rowRules:
+    - {name: Own region, tag: REGION, expression: "{col} = current_user_props('region')", except: ["group:auditors"]}
 
   peaka gov apply -f governance.yaml [--dry-run]`,
 		Args: cobra.NoArgs,
@@ -1124,6 +1197,9 @@ A change that reveals classified data may wait for a second administrator (202):
 	_ = cmd.MarkFlagRequired("file")
 	return cmd
 }
+
+// newID stands for a record a dry run would have made: what names it later in the file is shown, not refused.
+const newID = "(new) "
 
 func applyGovernance(file string) error {
 	raw, err := readInput(file)
@@ -1158,9 +1234,25 @@ func applyGovernance(file string) error {
 		}
 		report = append(report, entry)
 	}
+	same := func(kind, name string) {
+		report = append(report, map[string]any{"kind": kind, "name": name, "action": "none", "result": "unchanged"})
+	}
+	// The id of what a create made; under --dry-run a stand-in, so that what names it later is still shown.
+	made := func(resp *api.Response, name string) string {
+		if resp != nil && (resp.Status == http.StatusCreated || resp.Status == http.StatusOK) {
+			var r record
+			if json.Unmarshal(resp.Body, &r) == nil {
+				return str(r["id"])
+			}
+		}
+		if gf.dryRun {
+			return newID + name
+		}
+		return ""
+	}
 
-	// What the file names, found before anything is sent: a label or name that is two records is refused, as the
-	// change would go to one of them by chance (R5-6).
+	// What the file names, found before anything is sent: a name that is two records is refused, as the change would
+	// go to one of them by chance (R5-6).
 	existing, err := listAt(rt, base+"/tags")
 	if err != nil {
 		return err
@@ -1191,41 +1283,272 @@ func applyGovernance(file string) error {
 		return api.Exit(api.ExitConflict, "nothing was applied: %s; rename them in Peaka first", strings.Join(unique(ambiguous), "; "))
 	}
 	byLabel := map[string]string{}
+	tagByID := map[string]record{}
+	for _, t := range existing {
+		tagByID[str(t["id"])] = t
+		if k := strings.ToUpper(str(t["key"])); k != "" {
+			byLabel[k] = str(t["id"])
+		}
+	}
 	for k, ids := range tagsByLabel {
 		byLabel[k] = ids[0]
 	}
+	tagOf := func(ref string) (string, error) {
+		if id, ok := byLabel[strings.ToUpper(strings.TrimSpace(ref))]; ok {
+			return id, nil
+		}
+		if uuidRE.MatchString(strings.TrimSpace(ref)) {
+			return strings.TrimSpace(ref), nil
+		}
+		return "", fmt.Errorf("no tag %q", ref)
+	}
+
+	// Tags: only what the file says and what differs is sent; a tag as the file says is left alone.
 	for _, t := range want.Tags {
 		if len(t.Rules) > 0 {
-			note("tag", t.Name, "resolve", nil, fmt.Errorf("a tag carries no masking rules; set them with `peaka gov masking-policies create --tag %s`", t.Name))
+			note("tag", t.Name, "resolve", nil, fmt.Errorf("a tag carries no masking rules; set them under maskingPolicies"))
 			continue
 		}
-		c := &callCtx{Params: map[string]string{}, Body: map[string]any{"name": t.Name, "description": t.Description, "active": t.Active == nil || *t.Active}}
-		if id, ok := byLabel[strings.ToUpper(t.Name)]; ok {
-			resp, err := send(client, http.MethodPatch, base+"/tags/"+id, c.Body)
-			note("tag", t.Name, "update", resp, err)
-		} else {
-			resp, err := send(client, http.MethodPost, base+"/tags", c.Body)
-			note("tag", t.Name, "create", resp, err)
+		parent := ""
+		if t.Parent != nil && !strings.EqualFold(strings.TrimSpace(*t.Parent), "none") && strings.TrimSpace(*t.Parent) != "" {
+			if parent, err = tagOf(*t.Parent); err != nil {
+				note("tag", t.Name, "resolve", nil, fmt.Errorf("its parent: %v (a parent comes before its children in the file)", err))
+				continue
+			}
 		}
+		id, there := byLabel[strings.ToUpper(t.Name)]
+		if !there {
+			body := map[string]any{"name": t.Name, "active": t.Active == nil || *t.Active}
+			if t.Description != nil {
+				body["description"] = *t.Description
+			}
+			for k, v := range map[string]string{"key": t.Key, "parentId": parent, "status": t.Status} {
+				if v != "" {
+					body[k] = v
+				}
+			}
+			if t.Sensitivity != nil && !strings.EqualFold(*t.Sensitivity, "none") && *t.Sensitivity != "" {
+				body["sensitivity"] = *t.Sensitivity
+			}
+			resp, err := send(client, http.MethodPost, base+"/tags", body)
+			note("tag", t.Name, "create", resp, err)
+			if id := made(resp, t.Name); err == nil && id != "" {
+				byLabel[strings.ToUpper(t.Name)] = id
+			}
+			continue
+		}
+		now := tagByID[id]
+		if t.Key != "" && !strings.EqualFold(t.Key, str(now["key"])) {
+			note("tag", t.Name, "update", nil, fmt.Errorf("its key is %s and never changes", str(now["key"])))
+			continue
+		}
+		patch := map[string]any{}
+		if t.Name != str(now["name"]) {
+			patch["name"] = t.Name
+		}
+		if t.Description != nil && *t.Description != str(now["description"]) {
+			patch["description"] = *t.Description
+		}
+		if a, _ := now["active"].(bool); t.Active != nil && *t.Active != a {
+			patch["active"] = *t.Active
+		}
+		if t.Parent != nil && parent != str(now["parentId"]) {
+			patch["parentId"] = parent
+		}
+		if t.Sensitivity != nil {
+			s := *t.Sensitivity
+			if strings.EqualFold(s, "none") {
+				s = ""
+			}
+			if !strings.EqualFold(s, str(now["sensitivity"])) {
+				patch["sensitivity"] = s
+			}
+		}
+		if t.Status != "" && !strings.EqualFold(t.Status, str(now["status"])) {
+			patch["status"] = t.Status
+		}
+		if len(patch) == 0 {
+			same("tag", t.Name)
+			continue
+		}
+		resp, err := send(client, http.MethodPatch, base+"/tags/"+id, patch)
+		note("tag", t.Name, "update", resp, err)
 	}
-	if len(want.Tags) > 0 && !gf.dryRun {
-		if existing, err = listAt(rt, base+"/tags"); err != nil {
+
+	// Masks, by name; a predefined mask is not the file's to change.
+	var masks []record
+	if len(want.Masks) > 0 || len(want.MaskingPolicies) > 0 {
+		if masks, err = masksForMatch(rt); err != nil {
 			return err
 		}
-		for k, ids := range index(existing, tagKey) {
-			byLabel[k] = ids[0]
+	}
+	for _, m := range want.Masks {
+		var now record
+		for _, x := range masks {
+			if strings.EqualFold(str(x["name"]), m.Name) {
+				now = x
+			}
+		}
+		if now == nil {
+			body := map[string]any{"name": m.Name, "expression": m.Expression}
+			if m.Description != nil {
+				body["description"] = *m.Description
+			}
+			resp, err := send(client, http.MethodPost, base+"/masks", body)
+			note("mask", m.Name, "create", resp, err)
+			if id := made(resp, m.Name); err == nil && id != "" {
+				masks = append(masks, record{"id": id, "name": m.Name})
+			}
+			continue
+		}
+		if p, _ := now["predefined"].(bool); p {
+			note("mask", m.Name, "update", nil, fmt.Errorf("a predefined mask does not change; give the organization's mask another name"))
+			continue
+		}
+		patch := map[string]any{}
+		if m.Expression != "" && m.Expression != str(now["expression"]) {
+			patch["expression"] = m.Expression
+		}
+		if m.Description != nil && *m.Description != str(now["description"]) {
+			patch["description"] = *m.Description
+		}
+		if len(patch) == 0 {
+			same("mask", m.Name)
+			continue
+		}
+		resp, err := send(client, http.MethodPatch, base+"/masks/"+str(now["id"]), patch)
+		note("mask", m.Name, "update", resp, err)
+	}
+
+	// Masking policies, by name.
+	if len(want.MaskingPolicies) > 0 {
+		policies, err := listAt(rt, base+"/masking-policies")
+		if err != nil {
+			return err
+		}
+		maskOf := func(ref string) (string, error) {
+			m, err := matchOne(masks, ref, "mask")
+			if err != nil {
+				return "", err
+			}
+			if k := str(m["key"]); k != "" {
+				return k, nil
+			}
+			return str(m["id"]), nil
+		}
+		groupOf := func(ref string) (string, error) {
+			p := map[string]string{}
+			err := resolveGroup(rt, ref, p)
+			return p["group"], err
+		}
+		for _, mp := range want.MaskingPolicies {
+			name := mp.Name
+			if name == "" {
+				name = mp.Tag
+			}
+			tagID, err := tagOf(mp.Tag)
+			if err != nil {
+				note("masking policy", name, "resolve", nil, err)
+				continue
+			}
+			body := map[string]any{}
+			if mp.Default != nil {
+				body["defaultMaskId"] = *mp.Default
+			}
+			if mp.Exceptions != nil {
+				xs := []any{}
+				for _, x := range *mp.Exceptions {
+					xs = append(xs, x)
+				}
+				body["exceptions"] = xs
+			}
+			if err := shapePolicy(body, maskOf, groupOf, tagOf); err != nil {
+				note("masking policy", name, "resolve", nil, err)
+				continue
+			}
+			var now record
+			for _, x := range policies {
+				if strings.EqualFold(str(x["name"]), name) {
+					now = x
+				}
+			}
+			if now == nil {
+				body["name"], body["tagId"], body["enabled"] = name, tagID, mp.Enabled == nil || *mp.Enabled
+				resp, err := send(client, http.MethodPost, base+"/masking-policies", body)
+				note("masking policy", name, "create", resp, err)
+				continue
+			}
+			if str(now["tagId"]) != tagID {
+				note("masking policy", name, "update", nil, fmt.Errorf("the policy is on another tag; give it another name"))
+				continue
+			}
+			if d, sent := body["defaultMaskId"]; sent && str(d) == str(now["defaultMaskId"]) {
+				delete(body, "defaultMaskId")
+			}
+			if xs, sent := body["exceptions"]; sent && sameJSON(xs, now["exceptions"]) {
+				delete(body, "exceptions")
+			}
+			if e, _ := now["enabled"].(bool); mp.Enabled != nil && *mp.Enabled != e {
+				body["enabled"] = *mp.Enabled
+			}
+			if len(body) == 0 {
+				same("masking policy", name)
+				continue
+			}
+			if v := str(now["version"]); v != "" {
+				body["version"] = v
+			}
+			resp, err := send(client, http.MethodPatch, base+"/masking-policies/"+str(now["id"]), body)
+			note("masking policy", name, "update", resp, err)
 		}
 	}
 
-	// Column tags: put on; one already there stays.
 	project := ""
-	if len(want.ColumnTags) > 0 || len(want.RowRules) > 0 {
+	if len(want.ColumnTags) > 0 || len(want.RowRules) > 0 || len(want.TableTags) > 0 {
 		project, _ = rt.needProject()
 	}
+
+	// Table and schema tags: put on; one already there stays.
+	for _, tt := range want.TableTags {
+		name := strings.TrimSuffix(tt.Schema+"."+tt.Table, ".") + " " + tt.Tag
+		id, err := tagOf(tt.Tag)
+		if err != nil || project == "" {
+			note("table tag", name, "add", nil, fmt.Errorf("no tag %q or no project in context", tt.Tag))
+			continue
+		}
+		q := url.Values{"projectId": {project}, "catalogId": {tt.CatalogID}, "schema": {tt.Schema}}
+		if tt.Table != "" {
+			q.Set("table", tt.Table)
+		}
+		there, err := listAt(rt, base+"/table-tags?"+q.Encode())
+		if err != nil {
+			note("table tag", name, "add", nil, err)
+			continue
+		}
+		on := false
+		for _, x := range there {
+			if str(x["tagId"]) == id && strings.EqualFold(str(x["table"]), tt.Table) {
+				on = true
+			}
+		}
+		if on {
+			same("table tag", name)
+			continue
+		}
+		body := map[string]any{"projectId": project, "catalogId": tt.CatalogID, "catalog": firstOf(tt.Catalog, tt.CatalogName), "schema": tt.Schema,
+			"tagId": id, "reason": tt.Reason}
+		if tt.Table != "" {
+			body["table"] = tt.Table
+		}
+		resp, err := send(client, http.MethodPost, base+"/table-tags", body)
+		note("table tag", name, "add", resp, err)
+	}
+
+	// Column tags: put on; one already on the column itself stays (an inherited one is not the column's own).
 	for _, ct := range want.ColumnTags {
 		name := ct.Schema + "." + ct.Table + "." + ct.Column + " " + ct.Tag
-		id, ok := byLabel[strings.ToUpper(ct.Tag)]
-		if !ok || project == "" {
+		id, err := tagOf(ct.Tag)
+		if err != nil || project == "" {
 			note("column tag", name, "add", nil, fmt.Errorf("no tag %q or no project in context", ct.Tag))
 			continue
 		}
@@ -1237,20 +1560,16 @@ func applyGovernance(file string) error {
 		}
 		tagged := false
 		for _, x := range there {
-			if strings.EqualFold(str(x["column"]), ct.Column) && str(x["tagId"]) == id {
+			if strings.EqualFold(str(x["column"]), ct.Column) && str(x["tagId"]) == id && !strings.EqualFold(str(x["origin"]), "INHERITED") {
 				tagged = true
 			}
 		}
 		if tagged {
-			report = append(report, map[string]any{"kind": "column tag", "name": name, "action": "none", "result": "unchanged"})
+			same("column tag", name)
 			continue
 		}
-		catalog := ct.Catalog
-		if catalog == "" {
-			catalog = ct.CatalogName
-		}
 		resp, err := send(client, http.MethodPost, base+"/column-tags", map[string]any{"projectId": project, "catalogId": ct.CatalogID,
-			"catalog": catalog, "schema": ct.Schema, "table": ct.Table, "column": ct.Column, "tagId": id, "reason": ct.Reason})
+			"catalog": firstOf(ct.Catalog, ct.CatalogName), "schema": ct.Schema, "table": ct.Table, "column": ct.Column, "tagId": id, "reason": ct.Reason})
 		note("column tag", name, "add", resp, err)
 	}
 
@@ -1260,28 +1579,55 @@ func applyGovernance(file string) error {
 		ruleByID[str(r["id"])] = r
 	}
 	for _, rr := range want.RowRules {
-		enabled := rr.Enabled == nil || *rr.Enabled
+		tagID := ""
+		if rr.Tag != "" {
+			if tagID, err = tagOf(rr.Tag); err != nil {
+				note("row rule", rr.Name, "resolve", nil, err)
+				continue
+			}
+		}
+		var exceptions map[string]any
+		if rr.Except != nil {
+			c := &callCtx{Body: map[string]any{"except": *rr.Except, "noExceptions": len(*rr.Except) == 0}}
+			if err := rowRuleExceptions(c); err != nil {
+				note("row rule", rr.Name, "resolve", nil, err)
+				continue
+			}
+			exceptions = c.Body
+		}
 		if ids, ok := rulesByName[strings.ToLower(rr.Name)]; ok {
-			id := ids[0]
+			now := ruleByID[ids[0]]
 			// A rule's target never changes (a new target is a new rule): one named for another target is refused,
 			// not reported done (R5-7).
-			if why := otherTarget(ruleByID[id], rr.Table, byLabel[strings.ToUpper(rr.Tag)], rr.Tag, project); why != "" {
+			if why := otherTarget(now, rr.Table, tagID, rr.Tag, project); why != "" {
 				note("row rule", rr.Name, "update", nil, fmt.Errorf("%s; give the rule another name, or change it in Peaka", why))
 				continue
 			}
-			resp, err := send(client, http.MethodPatch, base+"/row-rules/"+id, map[string]any{"expression": rr.Expression, "enabled": enabled})
+			patch := map[string]any{}
+			if rr.Expression != "" && rr.Expression != str(now["expression"]) {
+				patch["expression"] = rr.Expression
+			}
+			if e, _ := now["enabled"].(bool); rr.Enabled != nil && *rr.Enabled != e {
+				patch["enabled"] = *rr.Enabled
+			}
+			if exceptions != nil && !sameSubjects(exceptions["exceptions"], now["exceptions"]) {
+				patch["exceptions"] = exceptions["exceptions"]
+			}
+			if len(patch) == 0 {
+				same("row rule", rr.Name)
+				continue
+			}
+			resp, err := send(client, http.MethodPatch, base+"/row-rules/"+ids[0], patch)
 			note("row rule", rr.Name, "update", resp, err)
 			continue
 		}
-		body := map[string]any{"name": rr.Name, "expression": rr.Expression, "enabled": enabled}
+		body := map[string]any{"name": rr.Name, "expression": rr.Expression, "enabled": rr.Enabled == nil || *rr.Enabled}
+		if exceptions != nil {
+			body["exceptions"] = exceptions["exceptions"]
+		}
 		switch {
 		case rr.Tag != "":
-			id, ok := byLabel[strings.ToUpper(rr.Tag)]
-			if !ok {
-				note("row rule", rr.Name, "create", nil, fmt.Errorf("no tag %q", rr.Tag))
-				continue
-			}
-			body["target"] = map[string]any{"type": "tag", "tagId": id}
+			body["target"] = map[string]any{"type": "tag", "tagId": tagID}
 		case rr.Table != "" && project != "":
 			body["target"] = map[string]any{"type": "table", "projectId": project, "table": rr.Table}
 		default:
@@ -1299,7 +1645,79 @@ func applyGovernance(file string) error {
 			return api.Exit(api.ExitInvalid, "some of the file was not applied")
 		}
 	}
+	for _, r := range report {
+		if str(r["result"]) == "waits for approval" {
+			return api.Exit(api.ExitPending, "some of the file waits for approval (peaka gov changes list)")
+		}
+	}
 	return nil
+}
+
+func firstOf(xs ...string) string {
+	for _, x := range xs {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
+}
+
+// sameJSON: two values that say the same once written as JSON (keys in order, absent and null alike left out).
+func sameJSON(a, b any) bool {
+	norm := func(v any) string {
+		raw, _ := json.Marshal(v)
+		var back any
+		_ = json.Unmarshal(raw, &back)
+		out, _ := json.Marshal(dropNulls(back))
+		return string(out)
+	}
+	return norm(a) == norm(b)
+}
+
+func dropNulls(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := map[string]any{}
+		for k, e := range x {
+			if e != nil {
+				out[k] = dropNulls(e)
+			}
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(x))
+		for _, e := range x {
+			out = append(out, dropNulls(e))
+		}
+		return out
+	}
+	return v
+}
+
+// sameSubjects: the same exceptions whatever their order, a subject's type whatever its case.
+func sameSubjects(a, b any) bool {
+	set := func(v any) map[string]bool {
+		raw, _ := json.Marshal(v)
+		var list []struct {
+			Subject struct{ Type, ID string } `json:"subject"`
+		}
+		_ = json.Unmarshal(raw, &list)
+		out := map[string]bool{}
+		for _, e := range list {
+			out[strings.ToLower(e.Subject.Type)+":"+strings.ToLower(e.Subject.ID)] = true
+		}
+		return out
+	}
+	x, y := set(a), set(b)
+	if len(x) != len(y) {
+		return false
+	}
+	for k := range x {
+		if !y[k] {
+			return false
+		}
+	}
+	return true
 }
 
 // tagKey indexes the public API's tags by name, whatever its case.

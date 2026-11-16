@@ -16,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"github.com/peakacom/peaka-cli/internal/api"
 	"github.com/peakacom/peaka-cli/internal/build"
 )
 
@@ -41,6 +42,7 @@ type mcpParam struct {
 func newMCPCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "mcp", Short: "Model Context Protocol server exposing the CLI to AI agents"}
 	var timeout time.Duration
+	var governanceWrites bool
 	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the CLI as MCP tools over stdio",
@@ -54,18 +56,23 @@ Claude Desktop / Cursor (mcpServers): {"peaka": {"command": "peaka", "args": ["m
 Tools: peaka_run (any command line), peaka_sql, and one tool per common
 operation (list/describe/create for catalogs, tables, queries, caches,
 metadata, connections, semantic catalogs). Resources: the agent guide and the
-Trino SQL rule set.`,
+Trino SQL rule set.
+
+Data governance is read-only through the server: tags, masking policies, row rules, the policy, groups, role grants
+and member attributes can be read (and a tag suggested), not changed, unless the server is started with
+--allow-governance-writes.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return serveMCP(timeout)
+			return serveMCP(timeout, governanceWrites)
 		},
 	}
 	serve.Flags().DurationVar(&timeout, "tool-timeout", 5*time.Minute, "maximum run time of one tool call")
+	serve.Flags().BoolVar(&governanceWrites, "allow-governance-writes", false, "let tools change data governance, groups, role grants and member attributes")
 	cmd.AddCommand(serve)
 	return cmd
 }
 
-func serveMCP(timeout time.Duration) error {
+func serveMCP(timeout time.Duration, governanceWrites bool) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -97,7 +104,7 @@ func serveMCP(timeout time.Duration) error {
 			}
 			args = append(args, "--format", format, "--no-input")
 			args = append(args, forwardedGlobals(a)...)
-			return runTool(ctx, exe, args, timeout), nil
+			return runTool(ctx, exe, args, timeout, governanceWrites), nil
 		})
 	}
 	server.AddResource(&mcp.Resource{URI: "peaka://guide", Name: "peaka_agent_guide", MIMEType: "text/markdown",
@@ -135,11 +142,14 @@ func forwardedGlobals(a map[string]any) []string {
 	return out
 }
 
-func runTool(ctx context.Context, exe string, args []string, timeout time.Duration) *mcp.CallToolResult {
+func runTool(ctx context.Context, exe string, args []string, timeout time.Duration, governanceWrites bool) *mcp.CallToolResult {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Env = os.Environ()
+	if !governanceWrites {
+		cmd.Env = append(cmd.Env, api.GuardEnv+"=governance")
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
@@ -217,7 +227,7 @@ func mcpTools() []mcpTool {
 	query := mcpParam{Name: "query", Description: "saved query id or name", Required: true}
 	cache := mcpParam{Name: "cache", Description: "cache id, or the cached table as catalog.schema.table", Required: true}
 	return []mcpTool{
-		{Name: "peaka_run", Description: "Run any peaka command line and return its output. Use peaka_help to discover commands and flags. Output is JSON; on failure the problem+json and exit code (2 usage, 3 identity, 4 not found, 5 permission, 6 invalid, 7 conflict, 8 failed, 9 retry).",
+		{Name: "peaka_run", Description: "Run any peaka command line and return its output. Use peaka_help to discover commands and flags. Output is JSON; on failure the problem+json and exit code (2 usage, 3 identity, 4 not found, 5 permission, 6 invalid, 7 conflict, 8 failed, 9 retry, 10 waits for approval). Data governance, groups, role grants and member attributes are read-only unless the server was started with --allow-governance-writes.",
 			Params: []mcpParam{{Name: "args", Description: "command arguments, e.g. [\"catalogs\",\"list\"] or [\"tables\",\"describe\",\"stripe.payment.charges\"]", Type: "array", Required: true}, projectParam},
 			Args: func(a map[string]any) []string {
 				var out []string

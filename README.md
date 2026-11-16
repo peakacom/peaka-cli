@@ -217,7 +217,7 @@ last an hour and are refreshed silently; the refresh token lasts months.
   piped, readable on a terminal). Branch on `code`.
 - Exit codes: 0 ok · 1 unexpected · 2 usage · 3 identity · 4 not found ·
   5 permission · 6 invalid request · 7 conflict · 8 query/job failed ·
-  9 retryable · 130 interrupted.
+  9 retryable · 10 accepted but waits for approval (not applied) · 130 interrupted.
 - No prompts when stdin is not a terminal (`--no-input`); destructive
   commands need `--yes` there.
 

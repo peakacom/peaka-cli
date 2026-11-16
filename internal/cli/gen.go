@@ -41,6 +41,9 @@ type opSpec struct {
 	Fields  []string // default table columns
 	Confirm string   // asked before running; {0} {1} are the arguments
 	Empty   string   // note printed when the response has no body ("Deleted.")
+	// Waits: a 202 is what the command is for (a suggestion waits by its nature). Without it a 202 means the change
+	// asked for was not made, and the command says so and ends with exit 10.
+	Waits bool
 }
 
 // callCtx is the request being assembled.
@@ -286,7 +289,7 @@ func (o opSpec) run(cmd *cobra.Command, args []string, values []*flagValue, from
 	if o.Method == "GET" && o.Unwrap == "items" && strings.Contains(path, "/governance/") && c.Query.Get("limit") == "" && !isLog(path) {
 		c.Query.Set("limit", "500")
 	}
-	return rt.call(o.Method, path, c.Query, payload, o.Unwrap, o.Fields, o.Empty)
+	return rt.call(o.Method, path, c.Query, payload, o.Unwrap, o.Fields, o.Empty, o.Waits)
 }
 
 // isLog: a list that only grows (decision records, the audit log): one page at a time, --cursor for the next.
@@ -295,7 +298,7 @@ func isLog(path string) bool {
 }
 
 // call sends the request and prints the answer by the output contract.
-func (r *Runtime) call(method, path string, query url.Values, body any, unwrap string, fields []string, empty string) error {
+func (r *Runtime) call(method, path string, query url.Values, body any, unwrap string, fields []string, empty string, waits ...bool) error {
 	client, err := r.api()
 	if err != nil {
 		return err
@@ -323,6 +326,15 @@ func (r *Runtime) call(method, path string, query url.Values, body any, unwrap s
 	var v any
 	if err := decodeJSON(raw, &v); err != nil {
 		return err
+	}
+	// 202: the change was not made; it waits for an approval. The record that waits is printed whole (a change
+	// request, a policy proposal, a suggestion), and the command ends with exit 10 so that a script does not take
+	// it for done.
+	if resp.Status == http.StatusAccepted && !(len(waits) > 0 && waits[0]) {
+		if err := r.printWith(v); err != nil {
+			return err
+		}
+		return api.Exit(api.ExitPending, "%s", pendingNote(v))
 	}
 	// A page of the public API ({items, nextCursor, hasMore}) is followed to its end: printing the first page alone
 	// would read as the whole list (milestone 1, DEV-4250). A caller that names a cursor asked for that page only.
@@ -368,6 +380,42 @@ func (r *Runtime) call(method, path string, query url.Values, body any, unwrap s
 			r.note("More records: add --cursor %s", next)
 		}
 	}
+	// An answer paged inside a record ({members|rows, next}): walked whole, as a list is; what the server itself
+	// cut short is said, since the list would read as everyone.
+	if m, ok := v.(map[string]any); ok && method == "GET" && unwrap != "" && unwrap != "items" && query.Get("cursor") == "" {
+		if list, isList := m[unwrap].([]any); isList {
+			seen := map[string]bool{}
+			next, _ := m["next"].(string)
+			for pages := 1; next != ""; pages++ {
+				if seen[next] || pages == maxPages {
+					return fmt.Errorf("the answer of %s does not end", path)
+				}
+				seen[next] = true
+				q := url.Values{}
+				for k, vs := range query {
+					q[k] = vs
+				}
+				q.Set("cursor", next)
+				var page map[string]any
+				if _, err := client.Do(r.Ctx, method, path, q, nil, &page); err != nil {
+					return err
+				}
+				more, _ := page[unwrap].([]any)
+				list = append(list, more...)
+				next, _ = page["next"].(string)
+			}
+			m[unwrap] = list
+		}
+		if cut, _ := m["truncated"].(bool); cut {
+			r.note("Not everything was considered: the answer is cut short on the server (truncated).")
+		}
+	}
+	// Many decided by a filter, some left: said, since the outcomes alone read as all of them.
+	if m, ok := v.(map[string]any); ok && method == "POST" && unwrap == "outcomes" {
+		if left := str(m["remaining"]); left != "" && left != "0" {
+			r.note("%s more match and are still pending: run the command again.", left)
+		}
+	}
 	if unwrap != "" {
 		if m, ok := v.(map[string]any); ok {
 			if inner, ok := m[unwrap]; ok {
@@ -376,6 +424,21 @@ func (r *Runtime) call(method, path string, query url.Values, body any, unwrap s
 		}
 	}
 	return r.printWith(v, fields...)
+}
+
+// pendingNote names what waits, by the record a 202 carries.
+func pendingNote(v any) string {
+	m, _ := v.(map[string]any)
+	id, _ := m["id"].(string)
+	switch {
+	case m["direction"] != nil && id != "":
+		return "not applied: the policy change waits for approval (peaka gov policy proposals; proposal " + id + ")"
+	case m["suggestions"] != nil || m["column"] != nil:
+		return "not applied: the tag waits as a suggestion (peaka gov suggestions list)"
+	case id != "":
+		return "not applied: the change waits for a second administrator (peaka gov changes describe " + id + ")"
+	}
+	return "not applied: the change waits for approval"
 }
 
 // readInput reads a file, or stdin for "-".

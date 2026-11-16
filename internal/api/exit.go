@@ -14,6 +14,7 @@ const (
 	ExitConflict    = 7   // state does not allow it
 	ExitFailed      = 8   // a query, flow or job failed
 	ExitRetryable   = 9   // transient; the same request may succeed later
+	ExitPending     = 10  // accepted, not applied: the change waits for someone's approval
 	ExitInterrupted = 130 // Ctrl-C
 )
 

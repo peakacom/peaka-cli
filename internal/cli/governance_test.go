@@ -10,8 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"errors"
 	"github.com/peakacom/peaka-cli/internal/api"
 	"github.com/peakacom/peaka-cli/internal/config"
+	"io"
+	"os"
+	"path/filepath"
 )
 
 // Codex review round 5, R5-6: a label or name that is two records is refused before anything is sent.
@@ -499,5 +503,130 @@ func TestPolicyFields(t *testing.T) {
 	}
 	if err := policyFields(&callCtx{Body: map[string]any{}}); err == nil {
 		t.Error("no field is refused")
+	}
+}
+
+// A 202 is not done: the record that waits is printed and the command ends with exit 10, except where waiting is
+// what the command is for (a suggestion).
+func TestAHeldChangeIsNotDone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"id":"cr-1","kind":"TAG_DELETE","status":"PENDING"}`)
+	}))
+	defer srv.Close()
+	var out strings.Builder
+	r := &Runtime{Ctx: context.Background(), Settings: &config.Settings{Source: map[string]string{}}, client: api.New(srv.URL, "test", time.Second),
+		Out: &out, Err: &out}
+	gf.format = "json"
+	defer func() { gf.format = "" }()
+	err := r.call("DELETE", "/organizations/o/governance/tags/t", url.Values{}, nil, "", nil, "Deleted.")
+	var exit *api.ExitError
+	if !errors.As(err, &exit) || exit.Code != api.ExitPending || !strings.Contains(err.Error(), "cr-1") {
+		t.Fatalf("a held delete: %v", err)
+	}
+	if !strings.Contains(out.String(), "cr-1") {
+		t.Errorf("the change request is not printed: %s", out.String())
+	}
+	if err := r.call("POST", "/organizations/o/governance/tag-suggestions", url.Values{}, map[string]any{}, "", nil, "", true); err != nil {
+		t.Fatalf("a suggestion waits by its nature: %v", err)
+	}
+}
+
+// An answer paged inside a record is read to its end, and what was left undecided is said.
+func TestAnAnswerInARecordIsReadWhole(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case req.Method == "POST":
+			fmt.Fprint(w, `{"outcomes":[{"id":"s1","outcome":"APPROVED"}],"remaining":240}`)
+		case req.URL.Query().Get("cursor") == "":
+			fmt.Fprint(w, `{"members":[{"member":{"email":"a@x"}}],"next":"m2","truncated":true}`)
+		default:
+			fmt.Fprint(w, `{"members":[{"member":{"email":"b@x"}}]}`)
+		}
+	}))
+	defer srv.Close()
+	var out, notes strings.Builder
+	r := &Runtime{Ctx: context.Background(), Settings: &config.Settings{Source: map[string]string{}}, client: api.New(srv.URL, "test", time.Second),
+		Out: &out, Err: &notes}
+	gf.format = "json"
+	defer func() { gf.format = "" }()
+	if err := r.call("GET", "/organizations/o/governance/access/columns", url.Values{}, nil, "members", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "a@x") || !strings.Contains(out.String(), "b@x") || !strings.Contains(notes.String(), "truncated") {
+		t.Errorf("members: %s / %s", out.String(), notes.String())
+	}
+	if err := r.call("POST", "/organizations/o/governance/tag-suggestions/approve", url.Values{}, map[string]any{}, "outcomes", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(notes.String(), "240 more") {
+		t.Errorf("what is left is not said: %s", notes.String())
+	}
+}
+
+// apply sends only what the file says and what differs; a dry run of a file that makes a tag and uses it does not fail.
+func TestApplyLeavesWhatTheFileDoesNotSay(t *testing.T) {
+	org := "11111111-1111-1111-1111-111111111111"
+	var writes []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method != "GET" {
+			body, _ := io.ReadAll(req.Body)
+			writes = append(writes, req.Method+" "+req.URL.Path[strings.Index(req.URL.Path, "/governance"):]+" "+string(body))
+			fmt.Fprint(w, `{"id":"x"}`)
+			return
+		}
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/governance/tags"):
+			fmt.Fprint(w, `{"items":[{"id":"t1","name":"PHI","key":"phi","description":"Health","active":false,"status":"ACTIVE"}],"hasMore":false}`)
+		case strings.HasSuffix(req.URL.Path, "/governance/row-rules"):
+			fmt.Fprint(w, `{"items":[{"id":"r1","name":"Own region","expression":"{col} = 1","enabled":true,"target":{"type":"tag","tagId":"t1"}}],"hasMore":false}`)
+		case strings.Contains(req.URL.Path, "/governance/"):
+			fmt.Fprint(w, `{"items":[],"hasMore":false}`)
+		default:
+			fmt.Fprintf(w, `{"id":%q,"name":"Org"}`, org)
+		}
+	}))
+	defer srv.Close()
+	file := filepath.Join(t.TempDir(), "gov.yaml")
+	if err := os.WriteFile(file, []byte(`
+tags:
+  - {name: PHI}
+  - {name: Email, parent: PHI}
+columnTags:
+  - {catalogId: "7", schema: public, table: people, column: email, tag: Email}
+rowRules:
+  - {name: Own region, tag: PHI, expression: "{col} = 1"}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous, wasDry := rt, gf.dryRun
+	defer func() { rt, gf.dryRun, gf.format = previous, wasDry, "" }()
+	gf.format = "json"
+	for _, dry := range []bool{true, false} {
+		writes = nil
+		var out strings.Builder
+		client := api.New(srv.URL, "test", time.Second)
+		if dry {
+			client.DryRun = io.Discard
+		}
+		gf.dryRun = dry
+		rt = &Runtime{Ctx: context.Background(), Settings: &config.Settings{Org: org, Project: "p", Source: map[string]string{}}, client: client, Out: &out, Err: io.Discard}
+		if err := applyGovernance(file); err != nil {
+			t.Fatalf("dry %v: %v\n%s", dry, err, out.String())
+		}
+		if strings.Contains(out.String(), "failed") || strings.Count(out.String(), "unchanged") != 2 {
+			t.Errorf("dry %v: PHI and the rule are as the file says, the rest is new: %s", dry, out.String())
+		}
+		for _, w := range writes {
+			if strings.Contains(w, "/tags/t1") || strings.Contains(w, "/row-rules/r1") {
+				t.Errorf("what is as the file says was written again: %s", w)
+			}
+		}
+		if !dry && len(writes) != 2 {
+			t.Errorf("writes: %v", writes)
+		}
 	}
 }

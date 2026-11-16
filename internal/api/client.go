@@ -85,6 +85,11 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		contentType = "application/json"
 	}
 
+	if method != http.MethodGet && method != http.MethodHead {
+		if why := governanceGuard(os.Getenv(GuardEnv), method, path); why != "" {
+			return nil, Exit(ExitPermission, "%s", why)
+		}
+	}
 	if c.DryRun != nil && method != http.MethodGet && method != http.MethodHead {
 		dry := map[string]any{"dryRun": true, "method": method, "url": u}
 		if len(payload) > 0 {
@@ -162,6 +167,33 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		}
 	}
 	return last, nil
+}
+
+// GuardEnv is set by `peaka mcp serve` for the commands it runs: "governance" refuses every change to data
+// governance, groups, role grants and member attributes, so that an agent reading through the server cannot loosen
+// who sees what unless the person who started the server allowed it (--allow-governance-writes).
+const GuardEnv = "PEAKA_MCP_GUARD"
+
+// governanceGuard says why a writing request is refused under the guard; "" when it may go.
+func governanceGuard(guard, method, path string) string {
+	if guard != "governance" {
+		return ""
+	}
+	p := "/" + strings.Trim(path, "/")
+	if i := strings.Index(p, "?"); i >= 0 {
+		p = p[:i]
+	}
+	// A suggestion changes nothing: it waits for an administrator.
+	if method == http.MethodPost && strings.HasSuffix(p, "/governance/tag-suggestions") {
+		return ""
+	}
+	for _, part := range []string{"/governance/", "/groups", "/grants", "/attributes", "/members"} {
+		if strings.Contains(p+"/", part) && strings.HasPrefix(p, "/organizations/") {
+			return "this MCP server does not change data governance, groups, role grants or member attributes; " +
+				"start it with `peaka mcp serve --allow-governance-writes` to let it"
+		}
+	}
+	return ""
 }
 
 // Get is Do(GET) decoding into out.

@@ -54,3 +54,24 @@ func TestParseProblemKeepsBodyAndFillsGaps(t *testing.T) {
 		t.Fatalf("human: %q", buf.String())
 	}
 }
+
+func TestGovernanceGuard(t *testing.T) {
+	for path, refused := range map[string]bool{
+		"/organizations/o/governance/tags":                      true,
+		"/organizations/o/governance/policy":                    true,
+		"/organizations/o/groups/g/members/u":                   true,
+		"/organizations/o/workspaces/w/projects/p/grants":       true,
+		"/organizations/o/attributes/definitions":               true,
+		"/organizations/o/governance/tag-suggestions":           false,
+		"/organizations/o/governance/tag-suggestions/s/approve": true,
+		"/projects/p/queries":                                   false,
+		"organizations/o/governance/row-rules?reason=x":         true,
+	} {
+		if got := governanceGuard("governance", "POST", path) != ""; got != refused {
+			t.Errorf("%s: refused %v, want %v", path, got, refused)
+		}
+		if governanceGuard("", "POST", path) != "" {
+			t.Errorf("%s: refused without the guard", path)
+		}
+	}
+}
