@@ -310,7 +310,8 @@ classifications that cannot be read, materialized queries that would be refused,
 				Flags: []flagSpec{
 					{Name: "kind", In: "query", Help: "event kinds, comma-separated"},
 					{Name: "actor", In: "query", Help: "who made the change"},
-					{Name: "project", In: "query", Key: "projectId", Help: "a project's (its id)"},
+					// Not --project: that is the project in context, which most events (a tag made, the policy changed) have none of.
+					{Name: "project-id", In: "query", Key: "projectId", Help: "only the events of this project's tables (its id)"},
 					{Name: "table", In: "query", Help: "a table's"},
 					{Name: "column", In: "query", Help: "a column's"},
 					{Name: "since", In: "query", Help: "ISO-8601 instant"},
@@ -603,7 +604,12 @@ func resolveTag(r *Runtime, ref string, params map[string]string) error {
 	if err != nil {
 		return err
 	}
-	tags, err := listAt(r, fmt.Sprintf("/organizations/%s/governance/tags", org))
+	// The project in context is named: one who only suggests tags (a member who manages its tables) reads them by it.
+	path := fmt.Sprintf("/organizations/%s/governance/tags", org)
+	if r.Settings != nil && r.Settings.Project != "" {
+		path += "?" + url.Values{"projectId": {r.Settings.Project}}.Encode()
+	}
+	tags, err := listAt(r, path)
 	if err != nil {
 		return err
 	}
