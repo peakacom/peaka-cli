@@ -95,6 +95,43 @@ schemas, tables, columns (by alias too), keywords and functions. Meta
 commands: `\dc` `\dn` `\dt` `\d` `\use` `\x` `\format` `\timing` `\pager`
 `\max-rows` `\o` `\i` `\e` `\refresh` `\project` `\stats` `\explain` `\?` `\q`.
 
+## Data governance
+
+`peaka gov` (alias of `peaka governance`) manages an organization's
+classification and access rules; it needs `manage_data_governance`. `groups`,
+`grants`, `members` and `roles` are top-level commands.
+
+| Area | Commands |
+|---|---|
+| Classification | `gov tags`, `gov column-tags`, `gov table-tags`, `gov suggestions` |
+| What readers see | `gov masking-policies` (`mp`), `gov masks`, `gov row-rules`, `gov attributes` |
+| Publisher access | `gov publications list/approve/reject/revoke` |
+| Who sees what | `gov access member/column/holders/exposure/readers`, `gov decisions`, `gov impact` |
+| Reviews and exceptions | `gov reviews`, `gov declassifications`, `gov changes` |
+| Automatic classification | `gov sources`, `gov patterns` |
+| Policy and audit | `gov policy` (`proposals`, `proposal ID`, `approve`), `gov audit events/export` |
+| As code | `gov apply -f governance.yaml [--dry-run]` |
+
+```
+peaka gov publications list -f status=ALL
+peaka gov access member ana@example.com
+peaka gov audit events --kind MQ_REFRESH_REQUESTED --fields occurredAt,actor,actorKind,after.requestedBy
+```
+
+A change that waits for a second administrator exits 10. Governance refusals
+exit 7; branch on `code`:
+
+- `PUBLICATION_LAPSED`: a refresh of a query that runs with its publisher's
+  access, whose publication no longer stands. `params.requires` names what is
+  missing (`GOVERNANCE_APPROVAL`, `AUTHOR_PERMISSION`, `NOT_A_MEMBER`,
+  `NO_PROJECT_ACCESS`, `SUSPENDED`, `SOURCE_IMPERSONATION`).
+- `MEMBERSHIP_DISCLOSURE`: readers of the saved query could tell who belongs to
+  a sensitive group. The CLI shows the items and fingerprint and never accepts
+  it; the publisher accepts it in Studio, since the public API cannot record
+  an acceptance yet.
+- `CONFLICT` with `params.reason` `REFRESH_NOT_STOPPED`, or a refresh that is
+  already running: try again later (`peaka queries status`).
+
 ## Install
 
 Pick your platform; each block is complete, including shell completion.
