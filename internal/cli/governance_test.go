@@ -690,10 +690,13 @@ func TestCommandsForExistingRoutes(t *testing.T) {
 			fmt.Fprint(w, `{"items":[{"id":"g1","name":"Clinicians"}]}`)
 			return
 		case req.Method == http.MethodGet && req.URL.Path == "/organizations/"+o+"/governance/masks":
-			fmt.Fprint(w, `{"items":[{"id":"m1","key":"last_four","name":"Last four"}]}`)
+			fmt.Fprint(w, `{"items":[{"id":"m1","key":"last_four","name":"Last four"},{"id":"pm7","key":"show_last_four","name":"Show last four","predefined":true}]}`)
 			return
 		case req.Method == http.MethodGet && req.URL.Path == "/organizations/"+o+"/workspaces":
 			fmt.Fprint(w, `[{"id":"w1","name":"Lab"}]`)
+			return
+		case req.Method == http.MethodGet && req.URL.Path == "/organizations/"+o+"/workspaces/w1/projects":
+			fmt.Fprint(w, `[{"id":"AbCdEf12","name":"Clinic"}]`)
 			return
 		}
 		sent = append(sent, strings.TrimSpace(req.Method+" "+req.URL.Path+" "+string(body)))
@@ -703,7 +706,7 @@ func TestCommandsForExistingRoutes(t *testing.T) {
 	previous := rt
 	defer func() { rt, gf.format = previous, "" }()
 	gf.format = "json"
-	rt = &Runtime{Ctx: context.Background(), Settings: &config.Settings{Org: o, Project: "p", Source: map[string]string{}},
+	rt = &Runtime{Ctx: context.Background(), Settings: &config.Settings{Org: o, Project: "Clinic", Source: map[string]string{}},
 		client: api.New(srv.URL, "test", time.Second), Out: io.Discard, Err: io.Discard}
 
 	for _, c := range []struct {
@@ -712,8 +715,10 @@ func TestCommandsForExistingRoutes(t *testing.T) {
 		want string
 	}{
 		{newGovernanceCmd, []string{"masks", "describe", "Last four"}, "GET /organizations/" + o + "/governance/masks/m1"},
+		{newGovernanceCmd, []string{"masks", "describe", "show_last_four"}, "GET /organizations/" + o + "/governance/masks/pm7"},
 		{newGovernanceCmd, []string{"policy", "proposal", "pr1"}, "GET /organizations/" + o + "/governance/policy/proposals/pr1"},
 		{newGroupsCmd, []string{"update", "Clinicians", "--description", "Care team"}, "PATCH /organizations/" + o + `/groups/g1 {"description":"Care team"}`},
+		{newGrantsCmd, []string{"update", "gr1", "--role", "r2"}, "PATCH /organizations/" + o + `/workspaces/w1/projects/AbCdEf12/grants/gr1 {"roleId":"r2"}`},
 		{newGrantsCmd, []string{"update", "gr1", "--workspace", "Lab", "--role", "r2"}, "PATCH /organizations/" + o + `/workspaces/w1/grants/gr1 {"roleId":"r2"}`},
 	} {
 		sent = nil
