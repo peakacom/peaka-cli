@@ -84,6 +84,11 @@ On a terminal the first 1000 rows are shown (`--max-rows 0` for all) and
 wide tables are fitted to the terminal; in a pipe every row streams. Several
 statements separated by `;` run in order.
 
+Server warnings go to stderr as `warning: …`. Governance adds
+`PEAKA_LINEAGE_UNKNOWN` (a stored product whose lineage is not recorded, under
+the policy's `lineageUnknown=WARN`) and `PEAKA_GOVERNANCE_WARNINGS_UNAVAILABLE`.
+`--fail-on-warning` prints the rows and then exits 8, so CI can stop on them.
+
 The interactive session has multi-line editing (Enter runs a statement ending
 in `;`), syntax highlighting, history, and Tab completion of catalogs,
 schemas, tables, columns (by alias too), keywords and functions. Meta
@@ -216,8 +221,8 @@ last an hour and are refreshed silently; the refresh token lasts months.
 - Errors are the API's problem+json, passed through on stderr (one line when
   piped, readable on a terminal). Branch on `code`.
 - Exit codes: 0 ok · 1 unexpected · 2 usage · 3 identity · 4 not found ·
-  5 permission · 6 invalid request · 7 conflict · 8 query/job failed ·
-  9 retryable · 10 accepted but waits for approval (not applied) · 130 interrupted.
+  5 permission · 6 invalid request · 7 conflict · 8 query/job failed (also
+  `peaka sql --fail-on-warning` after a warning) · 9 retryable · 10 accepted but waits for approval (not applied) · 130 interrupted.
 - No prompts when stdin is not a terminal (`--no-input`); destructive
   commands need `--yes` there.
 

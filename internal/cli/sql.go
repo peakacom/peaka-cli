@@ -32,6 +32,7 @@ type sqlFlags struct {
 	noProgress   bool
 	session      []string
 	queryTimeout time.Duration
+	failOnWarn   bool // exit 8 when the server warns (a governance warning such as PEAKA_LINEAGE_UNKNOWN)
 	completeAt   bool // hidden: print the completions for the text instead of running it
 }
 
@@ -50,7 +51,10 @@ func newSQLCmd() *cobra.Command {
 
 Several statements separated by ';' run in order. On a terminal the first 1000 rows are shown
 (--max-rows 0 for all); in a pipe every row streams. Ctrl-C cancels the query on the server.
-Without a statement on a terminal, the interactive session starts.`,
+Without a statement on a terminal, the interactive session starts.
+
+Warnings from the server (such as PEAKA_LINEAGE_UNKNOWN, a stored product whose lineage is not recorded, or
+PEAKA_GOVERNANCE_WARNINGS_UNAVAILABLE) are printed to stderr; with --fail-on-warning the command then exits 8.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text, err := statementText(args, f.file)
@@ -90,6 +94,7 @@ Without a statement on a terminal, the interactive session starts.`,
 	cmd.Flags().BoolVar(&f.noProgress, "no-progress", false, "no progress line on stderr")
 	cmd.Flags().StringArrayVar(&f.session, "session", nil, "session property NAME=VALUE (repeatable)")
 	cmd.Flags().DurationVar(&f.queryTimeout, "query-timeout", 0, "cancel a query running longer than this (0 = no limit)")
+	cmd.Flags().BoolVar(&f.failOnWarn, "fail-on-warning", false, "exit 8 when the server returns a warning (the rows are still printed)")
 	cmd.Flags().BoolVar(&f.completeAt, "complete", false, "print the completions offered at the end of the text (development aid)")
 	_ = cmd.Flags().MarkHidden("complete")
 	cmd.AddCommand(newSQLTranspileCmd())
@@ -307,7 +312,30 @@ func (s *sqlSession) run(ctx context.Context, statement string) error {
 		}
 	}
 	s.summary(q, rows, truncated, maxRows)
+	if s.f.failOnWarn {
+		return warningFailure(q.Warnings)
+	}
 	return nil
+}
+
+// warningFailure is exit 8 naming the server's warnings (their code names), or nil when there are none.
+func warningFailure(ws []trino.Warning) error {
+	if len(ws) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(ws))
+	seen := map[string]bool{}
+	for _, w := range ws {
+		name, _ := w.Code["name"].(string)
+		if name == "" {
+			name = w.Message
+		}
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return api.Exit(api.ExitFailed, "the server returned %s (--fail-on-warning): %s", plural(len(ws), "warning"), strings.Join(names, ", "))
 }
 
 func (s *sqlSession) summary(q *trino.Query, rows int, truncated bool, maxRows int) {
