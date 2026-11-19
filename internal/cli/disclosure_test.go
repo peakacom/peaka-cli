@@ -262,3 +262,27 @@ func TestGovDisclosuresAccept(t *testing.T) {
 		t.Errorf("the flag's fingerprint is accepted: %v %q", err, *sent)
 	}
 }
+
+// Under `peaka mcp serve` without --allow-governance-writes (GuardEnv=governance) an acceptance never reaches the
+// server, even with the exact fingerprint: the save may be refused for its disclosure, the acceptance is refused by
+// the guard (exit 5) and nothing is sent again; gov disclosures accept is refused the same way.
+func TestTheMCPGuardBlocksAnAcceptance(t *testing.T) {
+	t.Setenv(api.GuardEnv, "governance")
+	refused := fmt.Sprintf(disclosure409, "draft:d1", `,"draftId":"d1"`)
+
+	srv, sent := disclosureServer(t, refused)
+	_, err := runSave(t, srv, "", false, "create", "--name", "ward_counts", "--sql", "SELECT 1", "--access", "definer", "--accept-disclosure", "fp-1")
+	var exit *api.ExitError
+	if !errors.As(err, &exit) || exit.Code != api.ExitPermission || !strings.Contains(err.Error(), "allow-governance-writes") {
+		t.Errorf("the guard refuses the acceptance: %v", err)
+	}
+	if len(*sent) != 1 || !strings.HasPrefix((*sent)[0], "POST /data/projects/AbCdEf12/queries ") {
+		t.Errorf("only the save reached the server: %q", *sent)
+	}
+
+	srv, sent = disclosureServer(t)
+	_, err = runSave(t, srv, "", false, "gov", "disclosures", "accept", "--object-kind", "SAVED_QUERY", "--object-id", "q1", "--accept-disclosure", "fp-1")
+	if !errors.As(err, &exit) || exit.Code != api.ExitPermission || len(*sent) != 0 {
+		t.Errorf("gov disclosures accept is refused under the guard: %v %q", err, *sent)
+	}
+}

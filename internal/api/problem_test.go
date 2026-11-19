@@ -167,7 +167,7 @@ func TestDraftHints(t *testing.T) {
 	if h := draft(map[string]any{"objectId": "q7"}); !strings.Contains(h, "already made query q7") || !strings.Contains(h, "do not create it again") {
 		t.Errorf("already made: %q", h)
 	}
-	if h := draft(map[string]any{"reason": "DRAFT_IN_USE"}); !strings.Contains(h, "same --draft") {
+	if h := draft(map[string]any{"reason": "DRAFT_IN_USE"}); !strings.Contains(h, "same --draft") || !strings.Contains(h, "does not wait or retry") {
 		t.Errorf("in use: %q", h)
 	}
 	for _, r := range []string{"DRAFT_PROTOCOL", "DRAFT_LEGACY", "DRAFT_EXPIRED", "DRAFT_REFUSED", "DRAFT_INVALID"} {

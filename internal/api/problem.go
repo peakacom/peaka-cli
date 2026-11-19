@@ -121,7 +121,7 @@ func draftHint(p *Problem) string {
 		return "an earlier attempt of this create already made query " + p.param("objectId") + ": read it (`peaka queries describe " +
 			p.param("objectId") + "`); do not create it again"
 	case reason == "DRAFT_IN_USE":
-		return "an earlier attempt of this create is still being saved: try again in a moment with the same --draft"
+		return "an earlier attempt of this create is still being saved; the CLI does not wait or retry: run the same create again in a moment with the same --draft"
 	case strings.HasPrefix(reason, "DRAFT_"):
 		return "this draft cannot be used (" + reason + "): run the same create again without --draft; a new disclosure may follow"
 	}
