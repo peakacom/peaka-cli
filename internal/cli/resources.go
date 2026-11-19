@@ -179,11 +179,18 @@ func newQueriesCmd() *cobra.Command {
 		opSpec{Use: "create", Short: "Save a query", Method: http.MethodPost, Path: "/data/projects/{project}/queries", Body: true,
 			Long: `  peaka queries create --name daily_revenue --sql 'SELECT …'
   peaka queries create --name daily_revenue --sql-file q.sql --path /finance
-  peaka queries create --name revenue_mv --type MATERIALIZED --materialize daily_revenue --every PT6H`,
-			Flags: queryFlags(true), Prepare: paramsIntoBody("materialize", "inputQueryRefId")},
+  peaka queries create --name revenue_mv --type MATERIALIZED --materialize daily_revenue --every PT6H
+  peaka queries create --name ward_counts --sql-file q.sql --access definer
+
+With --access definer, a save whose readers could tell who belongs to a sensitive group is refused with 409
+MEMBERSHIP_DISCLOSURE (exit 7) and shows what is disclosed. As its publisher, accept it with --accept-disclosure
+<fingerprint> (with --draft <draftId> on a create run again), or type accept at the prompt on a terminal; --yes
+does not accept it. The accepted create is sent again once with its draft.`,
+			Flags: append(queryFlags(true), disclosureFlags(true)...), Prepare: paramsIntoBody("materialize", "inputQueryRefId"), Send: saveQuery(true)},
 		opSpec{Use: "update ID|NAME", Short: "Change a saved query (unset fields keep their value)", Method: http.MethodPut, Path: "/data/projects/{project}/queries/{query}", Body: true,
-			Args: []argSpec{{Name: "ID", Resolve: resolveQuery}}, Flags: queryFlags(false),
-			Prepare: chain(paramsIntoBody("materialize", "inputQueryRefId"), mergeCurrent("/data/projects/{project}/queries/{query}", "displayName", "inputQuery", "queryType", "schedule", "inputQueryRefId", "path"))},
+			Args: []argSpec{{Name: "ID", Resolve: resolveQuery}}, Flags: append(queryFlags(false), disclosureFlags(false)...),
+			Prepare: chain(paramsIntoBody("materialize", "inputQueryRefId"), mergeCurrent("/data/projects/{project}/queries/{query}", "displayName", "inputQuery", "queryType", "schedule", "inputQueryRefId", "path")),
+			Send:    saveQuery(false)},
 		opSpec{Use: "delete ID|NAME", Short: "Delete a saved query", Method: http.MethodDelete, Path: "/data/projects/{project}/queries/{query}",
 			Args: []argSpec{{Name: "ID", Resolve: resolveQuery}}, Confirm: "Delete query {0}?", Empty: "Deleted."},
 		opSpec{Use: "move ID|NAME", Short: "Move a saved query to a folder path", Method: http.MethodPatch, Path: "/data/projects/{project}/queries/{query}/path",

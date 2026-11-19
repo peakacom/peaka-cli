@@ -103,7 +103,7 @@ func TestGovernanceConflictHints(t *testing.T) {
 	disclosure := &Problem{Code: "MEMBERSHIP_DISCLOSURE", Status: 409, Params: map[string]any{
 		"fingerprint": "f1", "discloses": "TRUE", "items": []any{map[string]any{"kind": "ROW_RULE"}, map[string]any{"kind": "TAG"}},
 		"objectKind": "MATERIALIZED_QUERY", "objectId": "draft:d1", "draftId": "d1"}}
-	if h := disclosure.Hint(); !strings.Contains(h, "2 reasons") || !strings.Contains(h, "accept") || !strings.Contains(h, "Studio") {
+	if h := disclosure.Hint(); !strings.Contains(h, "2 reasons") || !strings.Contains(h, "--draft d1 --accept-disclosure f1") || !strings.Contains(h, "nothing was saved") {
 		t.Errorf("disclosure hint: %q", h)
 	}
 	disclosure.Params["discloses"], disclosure.Params["items"] = "UNKNOWN", []any{map[string]any{"kind": "UNKNOWN"}}
@@ -153,7 +153,26 @@ func TestMembershipDisclosureIsShown(t *testing.T) {
 			t.Errorf("missing %q in %q", want, buf.String())
 		}
 	}
-	if (&Problem{Code: "CONFLICT", Params: map[string]any{"fingerprint": "x"}}).disclosureLines() != nil {
+	if (&Problem{Code: "CONFLICT", Params: map[string]any{"fingerprint": "x"}}).DisclosureLines() != nil {
 		t.Error("only a disclosure is shown this way")
+	}
+}
+
+// A create refused for its draft: already made (read it, do not create again), still being saved, or unusable.
+func TestDraftHints(t *testing.T) {
+	draft := func(params map[string]any) string {
+		params["field"] = "membershipDraftId"
+		return (&Problem{Code: "CONFLICT", Status: 409, Params: params}).Hint()
+	}
+	if h := draft(map[string]any{"objectId": "q7"}); !strings.Contains(h, "already made query q7") || !strings.Contains(h, "do not create it again") {
+		t.Errorf("already made: %q", h)
+	}
+	if h := draft(map[string]any{"reason": "DRAFT_IN_USE"}); !strings.Contains(h, "same --draft") {
+		t.Errorf("in use: %q", h)
+	}
+	for _, r := range []string{"DRAFT_PROTOCOL", "DRAFT_LEGACY", "DRAFT_EXPIRED", "DRAFT_REFUSED", "DRAFT_INVALID"} {
+		if h := draft(map[string]any{"reason": r}); !strings.Contains(h, "without --draft") || !strings.Contains(h, r) {
+			t.Errorf("%s: %q", r, h)
+		}
 	}
 }

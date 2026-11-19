@@ -72,6 +72,8 @@ func (p *Problem) Hint() string {
 		return publicationLapsedHint(p.param("requires"))
 	case p.Code == "MEMBERSHIP_DISCLOSURE":
 		return membershipDisclosureHint(p)
+	case p.param("field") == "membershipDraftId":
+		return draftHint(p)
 	case p.param("reason") == "REFRESH_NOT_STOPPED":
 		// Not "nothing was changed": an older service, or a later stage of the change, may have changed something.
 		return "the running refresh could not be confirmed stopped; check the query's status (`peaka queries status ID`) before retrying"
@@ -82,6 +84,9 @@ func (p *Problem) Hint() string {
 	}
 	return hintByCode[p.Code]
 }
+
+// Param is a string parameter of the problem, or "".
+func (p *Problem) Param(key string) string { return p.param(key) }
 
 // param is a string parameter of the problem, or "".
 func (p *Problem) param(key string) string {
@@ -109,6 +114,20 @@ func publicationLapsedHint(requires string) string {
 	return "publish it again; `peaka gov publications list -f status=ALL` shows its request" + otherwise
 }
 
+// draftHint answers a create refused for its draft: already made, still being saved, or a draft that cannot be used.
+func draftHint(p *Problem) string {
+	switch reason := p.param("reason"); {
+	case reason == "" && p.param("objectId") != "":
+		return "an earlier attempt of this create already made query " + p.param("objectId") + ": read it (`peaka queries describe " +
+			p.param("objectId") + "`); do not create it again"
+	case reason == "DRAFT_IN_USE":
+		return "an earlier attempt of this create is still being saved: try again in a moment with the same --draft"
+	case strings.HasPrefix(reason, "DRAFT_"):
+		return "this draft cannot be used (" + reason + "): run the same create again without --draft; a new disclosure may follow"
+	}
+	return ""
+}
+
 // membershipDisclosureHint explains a 409 MEMBERSHIP_DISCLOSURE: the publisher must accept the disclosure first.
 func membershipDisclosureHint(p *Problem) string {
 	what := "readers can tell who belongs to a sensitive group"
@@ -118,12 +137,17 @@ func membershipDisclosureHint(p *Problem) string {
 	if items, ok := p.Params["items"].([]any); ok && len(items) > 0 {
 		what += fmt.Sprintf(" (%d %s)", len(items), plural(len(items), "reason", "reasons"))
 	}
-	return what + "; the publisher must accept this before it is saved, and the API cannot record that yet: save the query in Studio and accept it there"
+	accept := "--accept-disclosure " + p.param("fingerprint")
+	if d := p.param("draftId"); d != "" {
+		accept = "--draft " + d + " " + accept
+	}
+	return what + "; nothing was saved. Only the publisher accepts it, after reviewing what is disclosed: run the same save again with " +
+		accept + " (or `peaka gov disclosures accept`)"
 }
 
-// disclosureLines show what a MEMBERSHIP_DISCLOSURE says is disclosed: each item (its kind, source and the tags it
+// DisclosureLines show what a MEMBERSHIP_DISCLOSURE says is disclosed: each item (its kind, source and the tags it
 // names) and the fingerprint an acceptance would record. The CLI never accepts a disclosure itself: it only shows it.
-func (p *Problem) disclosureLines() []string {
+func (p *Problem) DisclosureLines() []string {
 	if p.Code != "MEMBERSHIP_DISCLOSURE" {
 		return nil
 	}
@@ -191,7 +215,7 @@ func (p *Problem) WriteHuman(w io.Writer, verbose bool) {
 	if p.TraceID != "" {
 		fmt.Fprintf(w, "  trace  %s\n", p.TraceID)
 	}
-	for _, d := range p.disclosureLines() {
+	for _, d := range p.DisclosureLines() {
 		fmt.Fprintf(w, "  %s\n", d)
 	}
 	if h := p.Hint(); h != "" {

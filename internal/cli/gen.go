@@ -44,6 +44,8 @@ type opSpec struct {
 	// Waits: a 202 is what the command is for (a suggestion waits by its nature). Without it a 202 means the change
 	// asked for was not made, and the command says so and ends with exit 10.
 	Waits bool
+	// Send replaces the one request at the end (a query save that may be refused for a membership disclosure).
+	Send func(o opSpec, c *callCtx, path string) error
 }
 
 // callCtx is the request being assembled.
@@ -290,6 +292,9 @@ func (o opSpec) run(cmd *cobra.Command, args []string, values []*flagValue, from
 	// The governance lists are walked whole (call follows nextCursor): ask for the largest page they serve.
 	if o.Method == "GET" && o.Unwrap == "items" && strings.Contains(path, "/governance/") && c.Query.Get("limit") == "" && !isLog(path) {
 		c.Query.Set("limit", "500")
+	}
+	if o.Send != nil {
+		return o.Send(o, c, path)
 	}
 	return rt.call(o.Method, path, c.Query, payload, o.Unwrap, o.Fields, o.Empty, o.Waits)
 }

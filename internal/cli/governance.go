@@ -337,6 +337,8 @@ is for a connected catalog: a Peaka table's schema is its own.
 			opSpec{Use: "close ID", Short: "End a round", Method: http.MethodPost, Path: govPath + "/access-reviews/{id}/close", Args: []argSpec{{Name: "ID", Param: "id"}}},
 			opSpec{Use: "export ID", Short: "A round as CSV", Method: http.MethodGet, Path: govPath + "/access-reviews/{id}/export", Args: []argSpec{{Name: "ID", Param: "id"}}},
 		),
+		group("disclosures", "Membership disclosures a publisher accepts for a query that runs with their access", []string{"disclosure"},
+			disclosureAcceptSpec()),
 		group("publications", "Requests to publish a query that runs with its author's access", []string{"publication-requests"},
 			opSpec{Use: "list", Short: "Requests, newest first (-f status=ALL for every one; PENDING by default)", Method: http.MethodGet,
 				Path: govPath + "/publication-requests", Query: true, Unwrap: "items", Fields: []string{"id", "objectName", "requestedBy", "status", "createdAt"}},
