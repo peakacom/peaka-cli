@@ -108,7 +108,7 @@ classification and access rules; it needs `manage_data_governance`. `groups`,
 |---|---|
 | Classification | `gov tags`, `gov column-tags`, `gov table-tags`, `gov suggestions` |
 | What readers see | `gov masking-policies` (`mp`), `gov masks`, `gov row-rules`, `gov attributes` |
-| Publisher access | `gov publications list/approve/reject/revoke` |
+| Publisher access | `queries create/update --access definer`, `gov publications request/list/approve/reject/revoke`, `gov disclosures accept` |
 | Who sees what | `gov access member/column/holders/exposure/readers`, `gov decisions`, `gov impact` |
 | Reviews and exceptions | `gov reviews`, `gov declassifications`, `gov changes` |
 | Automatic classification | `gov sources`, `gov patterns` |
@@ -117,6 +117,8 @@ classification and access rules; it needs `manage_data_governance`. `groups`,
 
 ```
 peaka gov publications list -f status=ALL
+peaka queries create --name ward_counts --sql-file q.sql --access definer
+peaka gov publications request ward_counts --reason "Clinic dashboard"
 peaka gov access member ana@example.com
 peaka gov audit events --kind MQ_REFRESH_REQUESTED --fields occurredAt,actor,actorKind,after.requestedBy
 ```
@@ -129,9 +131,13 @@ exit 7; branch on `code`:
   missing (`GOVERNANCE_APPROVAL`, `AUTHOR_PERMISSION`, `NOT_A_MEMBER`,
   `NO_PROJECT_ACCESS`, `SUSPENDED`, `SOURCE_IMPERSONATION`).
 - `MEMBERSHIP_DISCLOSURE`: readers of the saved query could tell who belongs to
-  a sensitive group. The CLI shows the items and fingerprint and never accepts
-  it; the publisher accepts it in Studio, since the public API cannot record
-  an acceptance yet.
+  a sensitive group; nothing was saved. The CLI shows the items, tags and
+  fingerprint. Only the publisher accepts, explicitly: the same save again with
+  `--accept-disclosure <fingerprint>` (a create also with `--draft <draftId>`),
+  `accept` typed at the prompt on a terminal, or `gov disclosures accept`.
+  `--yes` never accepts. An accepted create is sent again once with its draft;
+  a create the server says was already made is shown, not made again; a draft
+  that cannot be used (`DRAFT_*`) means saving again without `--draft`.
 - `CONFLICT` with `params.reason` `REFRESH_NOT_STOPPED`: the running refresh
   could not be confirmed stopped; check `peaka queries status` before
   retrying. `REFRESH_ALREADY_RUNNING`: wait for the refresh to end, then retry.
