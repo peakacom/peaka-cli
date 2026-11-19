@@ -742,3 +742,60 @@ func TestCommandsForExistingRoutes(t *testing.T) {
 		t.Error("grants update needs --role")
 	}
 }
+
+// The gateway's DEV-4250 additions reach the person: a publication request, an audit event's impersonator, a column
+// tag's status and a materialized query's readsLive.
+func TestGatewayAdditionsAreShown(t *testing.T) {
+	const o = "11111111-1111-1111-1111-111111111111"
+	var sent []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := io.ReadAll(req.Body)
+		switch {
+		case req.URL.Path == "/organizations":
+			fmt.Fprintf(w, `[{"id":%q,"name":"Org"}]`, o)
+		case req.URL.Path == "/data/projects/AbCdEf12/queries":
+			fmt.Fprint(w, `[{"id":"q1","displayName":"ward_counts","queryType":"MATERIALIZED"}]`)
+		case strings.HasSuffix(req.URL.Path, "/audit-events"):
+			fmt.Fprint(w, `{"items":[{"occurredAt":"t1","kind":"TAG_APPLIED","actor":"ana","actorKind":"USER","impersonator":"support@peaka.com"}],"hasMore":false}`)
+		case strings.HasSuffix(req.URL.Path, "/column-tags"):
+			fmt.Fprint(w, `{"items":[{"id":"ct1","column":"ward","tagId":"t1","origin":"MANUAL","status":"LOST","ineffective":true}],"hasMore":false}`)
+		case strings.HasSuffix(req.URL.Path, "/materialized-queries/q1/status"):
+			fmt.Fprint(w, `{"queryId":"q1","queryName":"ward_counts","status":"SUCCEEDED","readsLive":true}`)
+		default:
+			sent = append(sent, req.Method+" "+req.URL.Path+" "+string(body))
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"id":"pr1","status":"PENDING"}`)
+		}
+	}))
+	defer srv.Close()
+	previous := rt
+	defer func() { rt, gf.format = previous, "" }()
+	run := func(format string, cmd *cobra.Command, args ...string) string {
+		gf.format = format
+		var out strings.Builder
+		rt = &Runtime{Ctx: context.Background(), Settings: &config.Settings{Org: o, Project: "AbCdEf12", Format: format, Source: map[string]string{}},
+			client: api.New(srv.URL, "test", time.Second), Out: &out, Err: io.Discard}
+		cmd.SetArgs(args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		return out.String()
+	}
+
+	run("json", newGovernanceCmd(), "publications", "request", "ward_counts", "--reason", "clinic dashboard")
+	if len(sent) != 1 || sent[0] != "POST /organizations/"+o+`/governance/publication-requests {"objectId":"q1","objectKind":"MATERIALIZED_QUERY","objectName":"ward_counts","projectId":"AbCdEf12","reason":"clinic dashboard"}` {
+		t.Errorf("publication request: %q", sent)
+	}
+	if out := run("table", newGovernanceCmd(), "audit", "events"); !strings.Contains(out, "support@peaka.com") {
+		t.Errorf("the impersonator is a column: %s", out)
+	}
+	if out := run("table", newGovernanceCmd(), "column-tags", "list", "7", "public", "people"); !strings.Contains(out, "LOST") || !strings.Contains(out, "STATUS") {
+		t.Errorf("a column tag's status is a column: %s", out)
+	}
+	if out := run("table", newQueriesCmd(), "status", "ward_counts"); !strings.Contains(strings.ToLower(out), "readslive") {
+		t.Errorf("readsLive is shown: %s", out)
+	}
+}

@@ -161,7 +161,7 @@ a reader no exception names gets the default; the order of exceptions does not m
 				Path:    govPath + "/column-tags",
 				Args:    []argSpec{{Name: "CATALOG_ID", Param: "catalog"}, {Name: "SCHEMA", Param: "schema"}, {Name: "TABLE", Param: "table"}},
 				Prepare: chain(projectIntoQuery, paramsIntoQuery("catalog", "catalogId", "schema", "schema", "table", "table")),
-				Unwrap:  "items", Fields: []string{"id", "column", "tagId", "origin", "reason"}},
+				Unwrap:  "items", Fields: []string{"id", "column", "tagId", "origin", "status", "ineffective", "reason"}},
 			opSpec{Use: "search", Short: "The organization's column tags: by tag, project, catalog, schema, table or a text", Method: http.MethodGet,
 				Path: govPath + "/column-tags",
 				Long: `  peaka gov column-tags search --tag PHI
@@ -174,7 +174,7 @@ a reader no exception names gets the default; the order of exceptions does not m
 					{Name: "table", In: "query", Help: "only this table"},
 					{Name: "q", In: "query", Help: "text in the column's or table's name"},
 				},
-				Unwrap: "items", Fields: []string{"projectId", "catalogId", "schema", "table", "column", "tagId", "origin", "id"}},
+				Unwrap: "items", Fields: []string{"projectId", "catalogId", "schema", "table", "column", "tagId", "origin", "status", "id"}},
 			opSpec{Use: "set", Short: "Set a table's column tags as a whole: what is not given comes off (inherited tags stay)", Method: http.MethodPut,
 				Path: govPath + "/column-tags/table", Body: true,
 				Long: `  peaka gov column-tags set --catalog-id 7 --schema public --table people --tag-column ssn=PHI --tag-column email=PII
@@ -342,6 +342,17 @@ is for a connected catalog: a Peaka table's schema is its own.
 		group("publications", "Requests to publish a query that runs with its author's access", []string{"publication-requests"},
 			opSpec{Use: "list", Short: "Requests, newest first (-f status=ALL for every one; PENDING by default)", Method: http.MethodGet,
 				Path: govPath + "/publication-requests", Query: true, Unwrap: "items", Fields: []string{"id", "objectName", "requestedBy", "status", "createdAt"}},
+			opSpec{Use: "request QUERY", Short: "Ask a governance administrator to let a query in the project in context run with your access",
+				Long: `Where the policy requires an approval, a save with --access definer is refused until a request is approved.
+Once it is, save the query again with --access definer.
+
+  peaka gov publications request ward_counts --reason "Ward totals for the clinic dashboard"
+  peaka gov publications request ward_counts --reason "…" --disclosure-fingerprint 9b2e…`,
+				Method: http.MethodPost, Path: govPath + "/publication-requests", Body: true,
+				Args: []argSpec{{Name: "QUERY", Resolve: resolvePublicationQuery}},
+				Flags: []flagSpec{{Name: "reason", Help: "why it should run with your access", Required: true},
+					{Name: "disclosure-fingerprint", Help: "the membership disclosure accepted for it, when it reveals one"}},
+				Prepare: publicationRequest},
 			opSpec{Use: "approve ID", Short: "Let the query run with its author's access", Method: http.MethodPost, Path: govPath + "/publication-requests/{id}/approve",
 				Body: true, Args: []argSpec{{Name: "ID", Param: "id"}}, Flags: []flagSpec{{Name: "reason", Help: "why"}}},
 			opSpec{Use: "reject ID", Short: "Refuse a request", Method: http.MethodPost, Path: govPath + "/publication-requests/{id}/reject",
@@ -557,6 +568,37 @@ Kinds:
 		}
 	}
 	return cmd
+}
+
+// resolvePublicationQuery names a saved query of the project in context: its id, name and kind.
+func resolvePublicationQuery(r *Runtime, ref string, params map[string]string) error {
+	project, err := r.needProject()
+	if err != nil {
+		return err
+	}
+	qs, err := r.queriesOf(project)
+	if err != nil {
+		return err
+	}
+	q, err := matchOne(qs, ref, "query")
+	if err != nil {
+		return err
+	}
+	params["query"], params["queryName"], params["queryKind"] = str(q["id"]), str(q["displayName"]), "SAVED_QUERY"
+	if strings.EqualFold(str(q["queryType"]), "MATERIALIZED") {
+		params["queryKind"] = "MATERIALIZED_QUERY"
+	}
+	return nil
+}
+
+// publicationRequest: the request names the query by its project, kind, id and name.
+func publicationRequest(c *callCtx) error {
+	project, err := rt.sqlProjectID()
+	if err != nil {
+		return err
+	}
+	c.Body["projectId"], c.Body["objectKind"], c.Body["objectId"], c.Body["objectName"] = project, c.Params["queryKind"], c.Params["query"], c.Params["queryName"]
+	return nil
 }
 
 func newGroupsCmd() *cobra.Command {
