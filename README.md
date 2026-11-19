@@ -129,8 +129,9 @@ exit 7; branch on `code`:
   a sensitive group. The CLI shows the items and fingerprint and never accepts
   it; the publisher accepts it in Studio, since the public API cannot record
   an acceptance yet.
-- `CONFLICT` with `params.reason` `REFRESH_NOT_STOPPED`, or a refresh that is
-  already running: try again later (`peaka queries status`).
+- `CONFLICT` with `params.reason` `REFRESH_NOT_STOPPED`: the running refresh
+  could not be confirmed stopped; check `peaka queries status` before
+  retrying. `REFRESH_ALREADY_RUNNING`: wait for the refresh to end, then retry.
 
 ## Install
 

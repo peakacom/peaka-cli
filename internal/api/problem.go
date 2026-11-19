@@ -73,9 +73,11 @@ func (p *Problem) Hint() string {
 	case p.Code == "MEMBERSHIP_DISCLOSURE":
 		return membershipDisclosureHint(p)
 	case p.param("reason") == "REFRESH_NOT_STOPPED":
-		return "the running refresh could not be confirmed stopped, so nothing was changed; try again in a minute (`peaka queries status ID`)"
-	case p.Status == 409 && strings.Contains(p.Detail, "already being refreshed"):
-		// No stable code or reason yet: the detail is the only sign of a refresh that is already running.
+		// Not "nothing was changed": an older service, or a later stage of the change, may have changed something.
+		return "the running refresh could not be confirmed stopped; check the query's status (`peaka queries status ID`) before retrying"
+	case p.param("reason") == "REFRESH_ALREADY_RUNNING",
+		// An older service says it only in the detail.
+		p.param("reason") == "" && p.Status == 409 && strings.Contains(p.Detail, "already being refreshed"):
 		return "a refresh is already running; wait for it to end (`peaka queries status ID`), then try again"
 	}
 	return hintByCode[p.Code]
@@ -96,11 +98,11 @@ func publicationLapsedHint(requires string) string {
 	case "AUTHOR_PERMISSION":
 		return "the publisher needs the publish_definer permission on the organization: ask an admin for it" + otherwise
 	case "NOT_A_MEMBER":
-		return "the publisher is no longer a member of the organization: a current member must publish it again" + otherwise
+		return "the publisher is no longer a member of the organization: restore their membership, or publish it again as a current member (a save keeps the original publisher)" + otherwise
 	case "NO_PROJECT_ACCESS":
 		return "the publisher can no longer run queries in this project: give them access again, or have someone with access publish it again" + otherwise
 	case "SUSPENDED":
-		return "the publisher's account is suspended: a current member must publish it again" + otherwise
+		return "the publisher's account is suspended: reactivate it, or publish it again as a current member (a save keeps the original publisher)" + otherwise
 	case "SOURCE_IMPERSONATION":
 		return "a source signs in as each directory user, so the query cannot run with its publisher's access" + otherwise
 	}

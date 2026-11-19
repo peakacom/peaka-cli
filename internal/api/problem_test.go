@@ -112,12 +112,21 @@ func TestGovernanceConflictHints(t *testing.T) {
 	}
 
 	notStopped := &Problem{Code: "CONFLICT", Status: 409, Params: map[string]any{"reason": "REFRESH_NOT_STOPPED", "resource": "query:q1"}}
-	if notStopped.ExitCode() != ExitConflict || !strings.Contains(notStopped.Hint(), "try again in a minute") {
+	if h := notStopped.Hint(); notStopped.ExitCode() != ExitConflict || !strings.Contains(h, "could not be confirmed stopped") ||
+		!strings.Contains(h, "status") || strings.Contains(h, "nothing was changed") {
 		t.Errorf("REFRESH_NOT_STOPPED: exit %d, hint %q", notStopped.ExitCode(), notStopped.Hint())
 	}
-	running := &Problem{Code: "CONFLICT", Status: 409, Detail: "This cache is already being refreshed; try again when the running refresh ends."}
-	if running.ExitCode() != ExitConflict || !strings.Contains(running.Hint(), "already running") {
-		t.Errorf("a refresh already running: exit %d, hint %q", running.ExitCode(), running.Hint())
+	for name, running := range map[string]*Problem{
+		"by reason":                    {Code: "CONFLICT", Status: 409, Detail: "Bu sorgu zaten yenileniyor.", Params: map[string]any{"reason": "REFRESH_ALREADY_RUNNING"}},
+		"older service, by its detail": {Code: "CONFLICT", Status: 409, Detail: "This cache is already being refreshed; try again when the running refresh ends."},
+	} {
+		if running.ExitCode() != ExitConflict || !strings.Contains(running.Hint(), "already running") {
+			t.Errorf("a refresh already running %s: exit %d, hint %q", name, running.ExitCode(), running.Hint())
+		}
+	}
+	other := &Problem{Code: "CONFLICT", Status: 409, Detail: "This cache is already being refreshed.", Params: map[string]any{"reason": "SOMETHING_ELSE"}}
+	if strings.Contains(other.Hint(), "already running") {
+		t.Error("a conflict with another reason is not read from its detail")
 	}
 	if (&Problem{Code: "CONFLICT", Status: 409, Detail: "stale version"}).Hint() != "" {
 		t.Error("another conflict gets no refresh hint")
