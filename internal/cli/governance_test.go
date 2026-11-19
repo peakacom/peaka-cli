@@ -13,6 +13,7 @@ import (
 	"errors"
 	"github.com/peakacom/peaka-cli/internal/api"
 	"github.com/peakacom/peaka-cli/internal/config"
+	"github.com/spf13/cobra"
 	"io"
 	"os"
 	"path/filepath"
@@ -670,5 +671,69 @@ func TestAuditEventsShowActorKindAndImpersonator(t *testing.T) {
 	}
 	if got, _ := complete(events2, nil, "TAG_APPLIED,group_member_r"); len(got) != 1 || got[0] != "TAG_APPLIED,GROUP_MEMBER_REMOVED" {
 		t.Errorf("the last item of the list completes: %v", got)
+	}
+}
+
+// N02 (DEV-4250): the gateway routes the CLI had no command for: a mask read, a group changed, a grant given another
+// role, a policy proposal read.
+func TestCommandsForExistingRoutes(t *testing.T) {
+	const o = "11111111-1111-1111-1111-111111111111"
+	var sent []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := io.ReadAll(req.Body)
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/organizations":
+			fmt.Fprintf(w, `[{"id":%q,"name":"Org"}]`, o)
+			return
+		case req.Method == http.MethodGet && req.URL.Path == "/organizations/"+o+"/groups":
+			fmt.Fprint(w, `{"items":[{"id":"g1","name":"Clinicians"}]}`)
+			return
+		case req.Method == http.MethodGet && req.URL.Path == "/organizations/"+o+"/governance/masks":
+			fmt.Fprint(w, `{"items":[{"id":"m1","key":"last_four","name":"Last four"}]}`)
+			return
+		case req.Method == http.MethodGet && req.URL.Path == "/organizations/"+o+"/workspaces":
+			fmt.Fprint(w, `[{"id":"w1","name":"Lab"}]`)
+			return
+		}
+		sent = append(sent, strings.TrimSpace(req.Method+" "+req.URL.Path+" "+string(body)))
+		fmt.Fprint(w, `{"id":"x"}`)
+	}))
+	defer srv.Close()
+	previous := rt
+	defer func() { rt, gf.format = previous, "" }()
+	gf.format = "json"
+	rt = &Runtime{Ctx: context.Background(), Settings: &config.Settings{Org: o, Project: "p", Source: map[string]string{}},
+		client: api.New(srv.URL, "test", time.Second), Out: io.Discard, Err: io.Discard}
+
+	for _, c := range []struct {
+		cmd  func() *cobra.Command
+		args []string
+		want string
+	}{
+		{newGovernanceCmd, []string{"masks", "describe", "Last four"}, "GET /organizations/" + o + "/governance/masks/m1"},
+		{newGovernanceCmd, []string{"policy", "proposal", "pr1"}, "GET /organizations/" + o + "/governance/policy/proposals/pr1"},
+		{newGroupsCmd, []string{"update", "Clinicians", "--description", "Care team"}, "PATCH /organizations/" + o + `/groups/g1 {"description":"Care team"}`},
+		{newGrantsCmd, []string{"update", "gr1", "--workspace", "Lab", "--role", "r2"}, "PATCH /organizations/" + o + `/workspaces/w1/grants/gr1 {"roleId":"r2"}`},
+	} {
+		sent = nil
+		cmd := c.cmd()
+		cmd.SetArgs(c.args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err != nil {
+			t.Errorf("%v: %v", c.args, err)
+			continue
+		}
+		if len(sent) != 1 || sent[0] != c.want {
+			t.Errorf("%v sent %q, want %q", c.args, sent, c.want)
+		}
+	}
+	grants := newGrantsCmd()
+	grants.SetArgs([]string{"update", "gr1"})
+	grants.SetOut(io.Discard)
+	grants.SetErr(io.Discard)
+	if err := grants.Execute(); err == nil {
+		t.Error("grants update needs --role")
 	}
 }
