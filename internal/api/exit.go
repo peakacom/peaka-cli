@@ -67,6 +67,8 @@ var exitByCode = map[string]int{
 	"EMAIL_ALREADY_REGISTERED":     ExitConflict,
 	"SEMANTIC_TABLE_CONFLICT":      ExitConflict,
 	"MATERIALIZED_QUERY_NOT_READY": ExitConflict,
+	"PUBLICATION_LAPSED":           ExitConflict,
+	"MEMBERSHIP_DISCLOSURE":        ExitConflict,
 
 	"QUERY_FAILED":        ExitFailed,
 	"QUERY_TIMEOUT":       ExitFailed,

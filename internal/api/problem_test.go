@@ -75,3 +75,57 @@ func TestGovernanceGuard(t *testing.T) {
 		}
 	}
 }
+
+// DEV-4250: the governance refusals of a save or a refresh are conflicts (exit 7) with a hint that says what they need.
+func TestGovernanceConflictHints(t *testing.T) {
+	for _, code := range []string{"PUBLICATION_LAPSED", "MEMBERSHIP_DISCLOSURE"} {
+		if got := (&Problem{Code: code, Status: 409}).ExitCode(); got != ExitConflict {
+			t.Errorf("%s: exit %d, want %d", code, got, ExitConflict)
+		}
+	}
+	lapsed := func(requires string) string {
+		return (&Problem{Code: "PUBLICATION_LAPSED", Status: 409, Params: map[string]any{"reason": "PUBLICATION_LAPSED", "requires": requires}}).Hint()
+	}
+	for requires, want := range map[string]string{
+		"GOVERNANCE_APPROVAL":  "approval",
+		"AUTHOR_PERMISSION":    "publish_definer",
+		"NOT_A_MEMBER":         "no longer a member",
+		"NO_PROJECT_ACCESS":    "can no longer run queries in this project",
+		"SUSPENDED":            "suspended",
+		"SOURCE_IMPERSONATION": "directory user",
+		"":                     "publish it again",
+	} {
+		if h := lapsed(requires); !strings.Contains(h, want) || !strings.Contains(h, "each reader's access") {
+			t.Errorf("requires %q: hint %q", requires, h)
+		}
+	}
+
+	disclosure := &Problem{Code: "MEMBERSHIP_DISCLOSURE", Status: 409, Params: map[string]any{
+		"fingerprint": "f1", "discloses": "TRUE", "items": []any{map[string]any{"kind": "ROW_RULE"}, map[string]any{"kind": "TAG"}},
+		"objectKind": "MATERIALIZED_QUERY", "objectId": "draft:d1", "draftId": "d1"}}
+	if h := disclosure.Hint(); !strings.Contains(h, "2 reasons") || !strings.Contains(h, "accept") || !strings.Contains(h, "Studio") {
+		t.Errorf("disclosure hint: %q", h)
+	}
+	disclosure.Params["discloses"], disclosure.Params["items"] = "UNKNOWN", []any{map[string]any{"kind": "UNKNOWN"}}
+	if h := disclosure.Hint(); !strings.Contains(h, "may be able") || !strings.Contains(h, "1 reason)") {
+		t.Errorf("unknown disclosure hint: %q", h)
+	}
+
+	notStopped := &Problem{Code: "CONFLICT", Status: 409, Params: map[string]any{"reason": "REFRESH_NOT_STOPPED", "resource": "query:q1"}}
+	if notStopped.ExitCode() != ExitConflict || !strings.Contains(notStopped.Hint(), "try again in a minute") {
+		t.Errorf("REFRESH_NOT_STOPPED: exit %d, hint %q", notStopped.ExitCode(), notStopped.Hint())
+	}
+	running := &Problem{Code: "CONFLICT", Status: 409, Detail: "This cache is already being refreshed; try again when the running refresh ends."}
+	if running.ExitCode() != ExitConflict || !strings.Contains(running.Hint(), "already running") {
+		t.Errorf("a refresh already running: exit %d, hint %q", running.ExitCode(), running.Hint())
+	}
+	if (&Problem{Code: "CONFLICT", Status: 409, Detail: "stale version"}).Hint() != "" {
+		t.Error("another conflict gets no refresh hint")
+	}
+
+	var buf bytes.Buffer
+	(&Problem{Code: "PUBLICATION_LAPSED", Status: 409, Detail: "q runs with its publisher's access…", Params: map[string]any{"requires": "NOT_A_MEMBER"}}).WriteHuman(&buf, false)
+	if !strings.Contains(buf.String(), "  hint   the publisher is no longer a member") {
+		t.Errorf("human: %q", buf.String())
+	}
+}

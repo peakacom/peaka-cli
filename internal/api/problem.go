@@ -65,8 +65,66 @@ func (p *Problem) ExitCode() int {
 	return ExitFailure
 }
 
-// Hint is the CLI's one-line suggestion for the code, or "".
-func (p *Problem) Hint() string { return hintByCode[p.Code] }
+// Hint is the CLI's one-line suggestion for the problem, or "". Some codes are answered by their params.
+func (p *Problem) Hint() string {
+	switch {
+	case p.Code == "PUBLICATION_LAPSED":
+		return publicationLapsedHint(p.param("requires"))
+	case p.Code == "MEMBERSHIP_DISCLOSURE":
+		return membershipDisclosureHint(p)
+	case p.param("reason") == "REFRESH_NOT_STOPPED":
+		return "the running refresh could not be confirmed stopped, so nothing was changed; try again in a minute (`peaka queries status ID`)"
+	case p.Status == 409 && strings.Contains(p.Detail, "already being refreshed"):
+		// No stable code or reason yet: the detail is the only sign of a refresh that is already running.
+		return "a refresh is already running; wait for it to end (`peaka queries status ID`), then try again"
+	}
+	return hintByCode[p.Code]
+}
+
+// param is a string parameter of the problem, or "".
+func (p *Problem) param(key string) string {
+	s, _ := p.Params[key].(string)
+	return s
+}
+
+// publicationLapsedHint says what a refresh refused with PUBLICATION_LAPSED needs, by params.requires.
+func publicationLapsedHint(requires string) string {
+	const otherwise = "; or switch the query to run with each reader's access"
+	switch requires {
+	case "GOVERNANCE_APPROVAL", "APPROVAL":
+		return "it needs a governance admin's approval for the query as it is now: request publishing again in Studio; admins see requests in `peaka gov publications list`" + otherwise
+	case "AUTHOR_PERMISSION":
+		return "the publisher needs the publish_definer permission on the organization: ask an admin for it" + otherwise
+	case "NOT_A_MEMBER":
+		return "the publisher is no longer a member of the organization: a current member must publish it again" + otherwise
+	case "NO_PROJECT_ACCESS":
+		return "the publisher can no longer run queries in this project: give them access again, or have someone with access publish it again" + otherwise
+	case "SUSPENDED":
+		return "the publisher's account is suspended: a current member must publish it again" + otherwise
+	case "SOURCE_IMPERSONATION":
+		return "a source signs in as each directory user, so the query cannot run with its publisher's access" + otherwise
+	}
+	return "publish it again; `peaka gov publications list -f status=ALL` shows its request" + otherwise
+}
+
+// membershipDisclosureHint explains a 409 MEMBERSHIP_DISCLOSURE: the publisher must accept the disclosure first.
+func membershipDisclosureHint(p *Problem) string {
+	what := "readers can tell who belongs to a sensitive group"
+	if p.param("discloses") == "UNKNOWN" {
+		what = "readers may be able to tell who belongs to a sensitive group (it could not all be checked)"
+	}
+	if items, ok := p.Params["items"].([]any); ok && len(items) > 0 {
+		what += fmt.Sprintf(" (%d %s)", len(items), plural(len(items), "reason", "reasons"))
+	}
+	return what + "; the publisher must accept this before it is saved, and the API cannot record that yet: save the query in Studio and accept it there"
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
 
 // WriteHuman renders the problem for a person (stderr, TTY).
 func (p *Problem) WriteHuman(w io.Writer, verbose bool) {
