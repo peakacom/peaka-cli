@@ -82,6 +82,8 @@ type flagSpec struct {
 	Set func(v any, body map[string]any)
 	// Resolve maps the value to path parameters (like argSpec.Resolve); nothing goes to the body.
 	Resolve resolver
+	// Values are what the flag takes, offered by shell completion; a comma-separated list completes its last item.
+	Values []string
 }
 
 type flagValue struct {

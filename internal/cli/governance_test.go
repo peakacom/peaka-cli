@@ -630,3 +630,45 @@ rowRules:
 		}
 	}
 }
+
+// N02 (DEV-4250): the audit log shows who acted and how, an impersonator only when there is one, and offers every kind.
+func TestAuditEventsShowActorKindAndImpersonator(t *testing.T) {
+	events := []any{
+		map[string]any{"occurredAt": "t1", "kind": "MQ_REFRESH_REQUESTED", "actor": "u1", "actorKind": "USER",
+			"subject": map[string]any{"object": "sales"}, "after": map[string]any{"requestedBy": "SERVICE_ACCOUNT"}},
+		map[string]any{"occurredAt": "t2", "kind": "TAG_APPLIED", "actor": "system", "actorKind": "SYSTEM", "impersonator": ""},
+	}
+	got := strings.Join(presentFields(events, auditFields), ",")
+	if got != "occurredAt,kind,actor,actorKind,subject.tag,subject.table,subject.column,subject.object,after.requestedBy,reason" {
+		t.Errorf("without an impersonator: %s", got)
+	}
+	events[1].(map[string]any)["impersonator"] = "admin@example.com"
+	if got := presentFields(events, auditFields); got[4] != "impersonator" {
+		t.Errorf("with an impersonator: %v", got)
+	}
+	if got := presentFields(nil, auditFields); strings.Contains(strings.Join(got, ","), "impersonator") || got[3] != "actorKind" {
+		t.Errorf("an empty page: %v", got)
+	}
+
+	for _, k := range []string{"MQ_REFRESH_REQUESTED", "GROUP_MEMBER_ADDED", "GROUP_MEMBER_REMOVED", "MEMBERSHIP_DISCLOSURE_ACCEPTED",
+		"ROW_RULE_UPDATED", "PUBLISHER_ACCESS_LAPSED", "GOVERNANCE_SETTINGS_CHANGED", "TAGGED_COLUMN_LOST", "TAG_SUGGESTION_WITHDRAWN"} {
+		found := false
+		for _, a := range auditKinds {
+			found = found || a == k
+		}
+		if !found {
+			t.Errorf("%s is not a known kind", k)
+		}
+	}
+	events2, _, err := newGovernanceCmd().Find([]string{"audit", "events"})
+	if err != nil || !strings.Contains(events2.Long, "GROUP_MEMBER_REMOVED") || !strings.Contains(events2.Long, "SERVICE_ACCOUNT") {
+		t.Fatalf("help lists the kinds and requestedBy: %v", err)
+	}
+	complete, _ := events2.GetFlagCompletionFunc("kind")
+	if complete == nil {
+		t.Fatal("--kind completes")
+	}
+	if got, _ := complete(events2, nil, "TAG_APPLIED,group_member_r"); len(got) != 1 || got[0] != "TAG_APPLIED,GROUP_MEMBER_REMOVED" {
+		t.Errorf("the last item of the list completes: %v", got)
+	}
+}

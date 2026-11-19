@@ -289,13 +289,52 @@ func (r *Runtime) print(v any) error {
 	return output.Print(r.Out, v, r.outputOptions())
 }
 
-// printWith renders with a different default field set for tables (ignored when --fields is given).
+// printWith renders with a different default field set for tables (ignored when --fields is given). A field written
+// "?name" is a column only when some record has a value there (an audit event's impersonator).
 func (r *Runtime) printWith(v any, tableFields ...string) error {
 	o := r.outputOptions()
 	if len(o.Fields) == 0 && (o.Format == "table" || o.Format == "md" || o.Format == "csv" || o.Format == "tsv") && len(tableFields) > 0 {
-		o.Fields = tableFields
+		o.Fields = presentFields(v, tableFields)
 	}
 	return output.Print(r.Out, v, o)
+}
+
+// presentFields keeps every plain field, and an optional "?name" field (without its "?") when a record carries it.
+func presentFields(v any, fields []string) []string {
+	var records []any
+	switch t := v.(type) {
+	case []any:
+		records = t
+	case map[string]any:
+		records = []any{t}
+	}
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		name, optional := strings.CutPrefix(f, "?")
+		if !optional {
+			out = append(out, f)
+			continue
+		}
+		for _, rec := range records {
+			if x := dotted(rec, name); x != nil && x != "" {
+				out = append(out, name)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// dotted walks a dotted path through maps; nil when a step is missing.
+func dotted(v any, path string) any {
+	for _, part := range strings.Split(path, ".") {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		v = m[part]
+	}
+	return v
 }
 
 // note writes a line for the person on stderr (silenced by --quiet).

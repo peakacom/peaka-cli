@@ -20,6 +20,54 @@ import (
 
 const govPath = "/organizations/{org}/governance"
 
+// auditKinds are the audit log's event kinds (Studio's GovernanceEventStore.Kind), offered to `gov audit events --kind`.
+var auditKinds = []string{
+	"TAG_APPLIED", "TAG_REMOVED", "TAG_INHERITED", "TAG_INHERITANCE_ENDED",
+	"DECLASSIFIED", "DECLASSIFICATION_REVOKED", "DECLASSIFICATION_EXPIRED", "DECLASSIFICATION_DROPPED",
+	"TAG_CREATED", "TAG_UPDATED", "TAG_DELETED",
+	"CUSTOM_MASK_CREATED", "CUSTOM_MASK_UPDATED", "CUSTOM_MASK_DELETED",
+	"ROW_RULE_CREATED", "ROW_RULE_UPDATED", "ROW_RULE_DELETED",
+	"MASKING_POLICY_CREATED", "MASKING_POLICY_UPDATED", "MASKING_POLICY_DELETED",
+	"PUBLISHER_ACCESS_REQUESTED", "PUBLISHER_ACCESS_APPROVED", "PUBLISHER_ACCESS_REJECTED", "PUBLISHER_ACCESS_REVOKED",
+	"PUBLISHER_ACCESS_LAPSED",
+	"MEMBER_SUSPENDED", "MEMBER_REACTIVATED",
+	"CHANGE_REQUESTED", "CHANGE_APPROVED", "CHANGE_REJECTED", "CHANGE_WITHDRAWN", "CHANGE_EXPIRED",
+	"ACCESS_REVIEW_STARTED", "ACCESS_REVIEW_KEPT", "ACCESS_REVIEW_REMOVED", "ACCESS_REVIEW_EXPECTED", "ACCESS_REVIEW_UNEXPECTED",
+	"ACCESS_REVIEW_CLOSED",
+	"CLASSIFICATION_SOURCE_ADDED", "CLASSIFICATION_SOURCE_UPDATED", "CLASSIFICATION_SOURCE_REMOVED", "CLASSIFICATION_MAPPING_CHANGED",
+	"TAG_SUGGESTION_APPROVED", "TAG_SUGGESTION_REJECTED", "TAG_SUGGESTION_WITHDRAWN",
+	"TAGGED_COLUMN_LOST", "TAGGED_COLUMN_RECREATED", "TAG_MOVE_SUGGESTED", "TAG_MOVE_APPROVED", "TAG_MOVE_REJECTED",
+	"COLUMN_REPORT_STALE",
+	"GOVERNANCE_SETTINGS_CHANGED",
+	"MEMBERSHIP_DISCLOSURE_ACCEPTED",
+	"MQ_REFRESH_REQUESTED",
+	"GROUP_MEMBER_ADDED", "GROUP_MEMBER_REMOVED",
+}
+
+// auditFields are the audit log's table columns; "?" ones only when an event on the page has them.
+var auditFields = []string{"occurredAt", "kind", "actor", "actorKind", "?impersonator", "subject.tag", "subject.table", "subject.column",
+	"?subject.object", "?after.requestedBy", "reason"}
+
+// wrapList joins words with ", " into lines of at most width characters, indented by two spaces.
+func wrapList(words []string, width int) string {
+	var b strings.Builder
+	line := "  "
+	for i, w := range words {
+		if i < len(words)-1 {
+			w += ","
+		}
+		if len(line) > 2 && len(line)+1+len(w) > width {
+			b.WriteString(strings.TrimRight(line, " ") + "\n")
+			line = "  "
+		}
+		if len(line) > 2 {
+			line += " "
+		}
+		line += w
+	}
+	return b.String() + line
+}
+
 var uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func newGovernanceCmd() *cobra.Command {
@@ -303,12 +351,24 @@ classifications that cannot be read, materialized queries that would be refused,
   peaka gov impact -f projectId=OtnUT0en`,
 			Method: http.MethodGet, Path: govPath + "/enforcement-impact", Query: true}.command(),
 		group("audit", "The organization's audit log", nil,
-			opSpec{Use: "events", Short: "Changes to classification, rules and the policy, newest first",
-				Long: `  peaka gov audit events --kind TAG_APPLIED,ROW_RULE_CREATED --since 2026-11-01T00:00:00Z
-  peaka gov audit events --actor ana@example.com --table charges`,
+			opSpec{Use: "events", Short: "Changes to classification, rules, access and the policy, newest first",
+				Long: `Each event names its actor and actorKind (USER, or SYSTEM for Peaka itself), and impersonator when someone was
+signed in as the actor. --kind takes the kinds below, comma-separated.
+
+  peaka gov audit events --kind TAG_APPLIED,ROW_RULE_CREATED --since 2026-11-01T00:00:00Z
+  peaka gov audit events --actor ana@example.com --table charges
+  peaka gov audit events --kind MQ_REFRESH_REQUESTED --fields occurredAt,actor,subject.object,after.requestedBy,after.runsAs
+  peaka gov audit events --kind GROUP_MEMBER_ADDED,GROUP_MEMBER_REMOVED --since 2026-11-01T00:00:00Z
+
+MQ_REFRESH_REQUESTED: after.requestedBy is USER, API_KEY, SERVICE_ACCOUNT, SCHEDULE or SERVICE; after.runsAs is
+PUBLISHER or SERVICE. Row rule events name each exception by kind, id and name. MEMBERSHIP_DISCLOSURE_ACCEPTED
+records the fingerprint a publisher accepted.
+
+Kinds:
+` + wrapList(auditKinds, 110),
 				Method: http.MethodGet, Path: govPath + "/audit-events", Query: true, Unwrap: "items",
 				Flags: []flagSpec{
-					{Name: "kind", In: "query", Help: "event kinds, comma-separated"},
+					{Name: "kind", In: "query", Help: "event kinds, comma-separated (see the list above)", Values: auditKinds},
 					{Name: "actor", In: "query", Help: "who made the change"},
 					// Not --project: that is the project in context, which most events (a tag made, the policy changed) have none of.
 					{Name: "project-id", In: "query", Key: "projectId", Help: "only the events of this project's tables (its id)"},
@@ -319,7 +379,7 @@ classifications that cannot be read, materialized queries that would be refused,
 					{Name: "limit", In: "query", Kind: "int", Help: "records a page (at most 500)"},
 					{Name: "cursor", In: "query", Help: "the page after: the cursor the page before names on stderr"},
 				},
-				Fields: []string{"occurredAt", "kind", "actor", "subject.tag", "subject.table", "subject.column", "reason"}},
+				Fields: auditFields},
 			opSpec{Use: "export", Short: "Decision records and policy changes as NDJSON (-f since=… -f until=…)", Method: http.MethodGet, Path: govPath + "/audit-events/export", Query: true},
 		),
 		group("suggestions", "Suggested column tags: a member suggests, a governance administrator approves or rejects", []string{"suggestion", "suggest"},

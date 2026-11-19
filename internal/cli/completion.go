@@ -72,7 +72,24 @@ func attachCompletions(cmd *cobra.Command, o opSpec) {
 	for _, f := range o.Flags {
 		if c := completerFor(f.Resolve); c != nil {
 			_ = cmd.RegisterFlagCompletionFunc(f.Name, flagCompleter(c))
+		} else if len(f.Values) > 0 {
+			_ = cmd.RegisterFlagCompletionFunc(f.Name, listCompleter(f.Values))
 		}
+	}
+}
+
+// listCompleter offers values for a comma-separated list: the items already given stay, the last one is completed.
+func listCompleter(values []string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		given, last := "", toComplete
+		if i := strings.LastIndexByte(toComplete, ','); i >= 0 {
+			given, last = toComplete[:i+1], toComplete[i+1:]
+		}
+		out := withPrefix(values, last)
+		for i := range out {
+			out[i] = given + out[i]
+		}
+		return out, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
 	}
 }
 
