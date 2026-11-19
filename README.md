@@ -88,6 +88,9 @@ Server warnings go to stderr as `warning: …`. Governance adds
 `PEAKA_LINEAGE_UNKNOWN` (a stored product whose lineage is not recorded, under
 the policy's `lineageUnknown=WARN`) and `PEAKA_GOVERNANCE_WARNINGS_UNAVAILABLE`.
 `--fail-on-warning` prints the rows and then exits 8, so CI can stop on them.
+With it, a result longer than `--max-rows` is still read to its end (the rest
+is not shown), so a warning on a later page is not missed. Warnings are not
+part of the JSON on stdout.
 
 The interactive session has multi-line editing (Enter runs a statement ending
 in `;`), syntax highlighting, history, and Tab completion of catalogs,

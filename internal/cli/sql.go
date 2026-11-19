@@ -54,7 +54,9 @@ Several statements separated by ';' run in order. On a terminal the first 1000 r
 Without a statement on a terminal, the interactive session starts.
 
 Warnings from the server (such as PEAKA_LINEAGE_UNKNOWN, a stored product whose lineage is not recorded, or
-PEAKA_GOVERNANCE_WARNINGS_UNAVAILABLE) are printed to stderr; with --fail-on-warning the command then exits 8.`,
+PEAKA_GOVERNANCE_WARNINGS_UNAVAILABLE) are printed to stderr; with --fail-on-warning the command then exits 8.
+With --fail-on-warning a result longer than --max-rows is still read to its end (the rest is not shown), so a
+warning on a later page is seen.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text, err := statementText(args, f.file)
@@ -94,7 +96,7 @@ PEAKA_GOVERNANCE_WARNINGS_UNAVAILABLE) are printed to stderr; with --fail-on-war
 	cmd.Flags().BoolVar(&f.noProgress, "no-progress", false, "no progress line on stderr")
 	cmd.Flags().StringArrayVar(&f.session, "session", nil, "session property NAME=VALUE (repeatable)")
 	cmd.Flags().DurationVar(&f.queryTimeout, "query-timeout", 0, "cancel a query running longer than this (0 = no limit)")
-	cmd.Flags().BoolVar(&f.failOnWarn, "fail-on-warning", false, "exit 8 when the server returns a warning (the rows are still printed)")
+	cmd.Flags().BoolVar(&f.failOnWarn, "fail-on-warning", false, "exit 8 when the server returns a warning (the rows are still printed; past --max-rows the result is read to its end, not shown)")
 	cmd.Flags().BoolVar(&f.completeAt, "complete", false, "print the completions offered at the end of the text (development aid)")
 	_ = cmd.Flags().MarkHidden("complete")
 	cmd.AddCommand(newSQLTranspileCmd())
@@ -297,7 +299,9 @@ func (s *sqlSession) run(ctx context.Context, statement string) error {
 			}
 			rows++
 		}
-		if truncated {
+		// Past the display limit the query is cancelled, unless --fail-on-warning must see every page: a warning
+		// may come with the last one. The rest is then read to its end and not shown.
+		if truncated && !s.f.failOnWarn {
 			_ = q.Cancel()
 			break
 		}
@@ -323,19 +327,21 @@ func warningFailure(ws []trino.Warning) error {
 	if len(ws) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(ws))
-	seen := map[string]bool{}
+	var names []string
+	seenName, seen := map[string]bool{}, map[string]bool{}
 	for _, w := range ws {
 		name, _ := w.Code["name"].(string)
 		if name == "" {
 			name = w.Message
 		}
-		if !seen[name] {
-			seen[name] = true
+		seen[name+"\x00"+w.Message] = true
+		if !seenName[name] {
+			seenName[name] = true
 			names = append(names, name)
 		}
 	}
-	return api.Exit(api.ExitFailed, "the server returned %s (--fail-on-warning): %s", plural(len(ws), "warning"), strings.Join(names, ", "))
+	// A page may repeat the warnings of the pages before it: each is counted once.
+	return api.Exit(api.ExitFailed, "the server returned %s (--fail-on-warning): %s", plural(len(seen), "warning"), strings.Join(names, ", "))
 }
 
 func (s *sqlSession) summary(q *trino.Query, rows int, truncated bool, maxRows int) {
