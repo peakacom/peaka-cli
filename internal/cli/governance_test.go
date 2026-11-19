@@ -652,7 +652,8 @@ func TestAuditEventsShowActorKindAndImpersonator(t *testing.T) {
 	}
 
 	for _, k := range []string{"MQ_REFRESH_REQUESTED", "GROUP_MEMBER_ADDED", "GROUP_MEMBER_REMOVED", "MEMBERSHIP_DISCLOSURE_ACCEPTED",
-		"ROW_RULE_UPDATED", "PUBLISHER_ACCESS_LAPSED", "GOVERNANCE_SETTINGS_CHANGED", "TAGGED_COLUMN_LOST", "TAG_SUGGESTION_WITHDRAWN"} {
+		"ROW_RULE_UPDATED", "PUBLISHER_ACCESS_LAPSED", "GOVERNANCE_SETTINGS_CHANGED", "TAGGED_COLUMN_LOST", "TAG_SUGGESTION_WITHDRAWN",
+		"CATALOG_SHARED", "CATALOG_UNSHARED"} {
 		found := false
 		for _, a := range auditKinds {
 			found = found || a == k
@@ -671,6 +672,19 @@ func TestAuditEventsShowActorKindAndImpersonator(t *testing.T) {
 	}
 	if got, _ := complete(events2, nil, "TAG_APPLIED,group_member_r"); len(got) != 1 || got[0] != "TAG_APPLIED,GROUP_MEMBER_REMOVED" {
 		t.Errorf("the last item of the list completes: %v", got)
+	}
+	// K23: a catalog share's event shows the catalog and the project it was shared with in the table.
+	shared := []any{map[string]any{"occurredAt": "t3", "kind": "CATALOG_SHARED", "actor": "u1", "actorKind": "USER",
+		"subject": map[string]any{"objectKind": "CATALOG", "object": "Stripe", "targetProjectId": "p2"}}}
+	if got := strings.Join(presentFields(shared, auditFields), ","); got != "occurredAt,kind,actor,actorKind,subject.tag,subject.table,subject.column,subject.object,subject.targetProjectId,reason" {
+		t.Errorf("a catalog share: %s", got)
+	}
+	// K23: a catalog shared and unshared are kinds the help names, with how a share ended, and --kind completes them.
+	if !strings.Contains(events2.Long, "CATALOG_UNSHARED") || !strings.Contains(events2.Long, "CATALOG_DELETED") {
+		t.Errorf("help names the catalog share kinds and after.via")
+	}
+	if got, _ := complete(events2, nil, "catalog_"); len(got) != 2 || got[0] != "CATALOG_SHARED" || got[1] != "CATALOG_UNSHARED" {
+		t.Errorf("--kind completes the catalog share kinds: %v", got)
 	}
 }
 

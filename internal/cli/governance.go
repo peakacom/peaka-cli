@@ -42,11 +42,12 @@ var auditKinds = []string{
 	"MEMBERSHIP_DISCLOSURE_ACCEPTED",
 	"MQ_REFRESH_REQUESTED",
 	"GROUP_MEMBER_ADDED", "GROUP_MEMBER_REMOVED",
+	"CATALOG_SHARED", "CATALOG_UNSHARED",
 }
 
 // auditFields are the audit log's table columns; "?" ones only when an event on the page has them.
 var auditFields = []string{"occurredAt", "kind", "actor", "actorKind", "?impersonator", "subject.tag", "subject.table", "subject.column",
-	"?subject.object", "?after.requestedBy", "reason"}
+	"?subject.object", "?subject.targetProjectId", "?after.requestedBy", "reason"}
 
 // wrapList joins words with ", " into lines of at most width characters, indented by two spaces.
 func wrapList(words []string, width int) string {
@@ -376,10 +377,13 @@ signed in as the actor. --kind takes the kinds below, comma-separated.
   peaka gov audit events --actor ana@example.com --table charges
   peaka gov audit events --kind MQ_REFRESH_REQUESTED --fields occurredAt,actor,subject.object,after.requestedBy,after.runsAs
   peaka gov audit events --kind GROUP_MEMBER_ADDED,GROUP_MEMBER_REMOVED --since 2026-11-01T00:00:00Z
+  peaka gov audit events --kind CATALOG_SHARED,CATALOG_UNSHARED --fields occurredAt,kind,actor,subject.object,subject.targetProjectId,after.via
 
 MQ_REFRESH_REQUESTED: after.requestedBy is USER, API_KEY, SERVICE_ACCOUNT, SCHEDULE or SERVICE; after.runsAs is
 PUBLISHER or SERVICE. Row rule events name each exception by kind, id and name. MEMBERSHIP_DISCLOSURE_ACCEPTED
-records the fingerprint a publisher accepted.
+records the fingerprint a publisher accepted. CATALOG_SHARED and CATALOG_UNSHARED name the catalog
+(subject.catalogId, its name as subject.object, subject.projectId) and the project it was shared with (subject.targetProjectId);
+after.via says how a share ended: SOURCE_UNSHARED, TARGET_REMOVED or CATALOG_DELETED.
 
 Kinds:
 ` + wrapList(auditKinds, 110),
