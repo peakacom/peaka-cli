@@ -119,6 +119,46 @@ func membershipDisclosureHint(p *Problem) string {
 	return what + "; the publisher must accept this before it is saved, and the API cannot record that yet: save the query in Studio and accept it there"
 }
 
+// disclosureLines show what a MEMBERSHIP_DISCLOSURE says is disclosed: each item (its kind, source and the tags it
+// names) and the fingerprint an acceptance would record. The CLI never accepts a disclosure itself: it only shows it.
+func (p *Problem) disclosureLines() []string {
+	if p.Code != "MEMBERSHIP_DISCLOSURE" {
+		return nil
+	}
+	var lines []string
+	items, _ := p.Params["items"].([]any)
+	for _, it := range items {
+		m, _ := it.(map[string]any)
+		kind, _ := m["kind"].(string)
+		line := "disclosed  " + kind
+		if src, _ := m["source"].(string); src != "" {
+			line += " " + src
+		}
+		if via, _ := m["via"].(string); via != "" {
+			line += " via " + via
+		}
+		var tags []string
+		ts, _ := m["tags"].([]any)
+		for _, t := range ts {
+			tm, _ := t.(map[string]any)
+			if label, _ := tm["label"].(string); label != "" {
+				tags = append(tags, label)
+			}
+		}
+		if len(tags) > 0 {
+			line += " (tags: " + strings.Join(tags, ", ") + ")"
+		}
+		if reason, _ := m["reason"].(string); reason != "" {
+			line += ": " + reason
+		}
+		lines = append(lines, line)
+	}
+	if f := p.param("fingerprint"); f != "" {
+		lines = append(lines, "fingerprint  "+f)
+	}
+	return lines
+}
+
 func plural(n int, one, many string) string {
 	if n == 1 {
 		return one
@@ -148,6 +188,9 @@ func (p *Problem) WriteHuman(w io.Writer, verbose bool) {
 	}
 	if p.TraceID != "" {
 		fmt.Fprintf(w, "  trace  %s\n", p.TraceID)
+	}
+	for _, d := range p.disclosureLines() {
+		fmt.Fprintf(w, "  %s\n", d)
 	}
 	if h := p.Hint(); h != "" {
 		fmt.Fprintf(w, "  hint   %s\n", h)

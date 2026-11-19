@@ -129,3 +129,22 @@ func TestGovernanceConflictHints(t *testing.T) {
 		t.Errorf("human: %q", buf.String())
 	}
 }
+
+// A disclosure is shown, never accepted: each item, its tags and the fingerprint are printed for the person.
+func TestMembershipDisclosureIsShown(t *testing.T) {
+	p := &Problem{Code: "MEMBERSHIP_DISCLOSURE", Status: 409, Detail: "Readers of this publication can tell who belongs to a sensitive group…",
+		Params: map[string]any{"fingerprint": "fp-123", "discloses": "TRUE", "objectKind": "SAVED_QUERY", "objectId": "q1",
+			"items": []any{map[string]any{"kind": "ROW_RULE_EXCEPTION", "source": "crm.public.patients.ward", "via": "SAVED_QUERY:q0",
+				"tags": []any{map[string]any{"label": "HIV clinic"}}}}}}
+	var buf bytes.Buffer
+	p.WriteHuman(&buf, false)
+	for _, want := range []string{"  disclosed  ROW_RULE_EXCEPTION crm.public.patients.ward via SAVED_QUERY:q0 (tags: HIV clinic)\n",
+		"  fingerprint  fp-123\n", "  hint   readers can tell"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing %q in %q", want, buf.String())
+		}
+	}
+	if (&Problem{Code: "CONFLICT", Params: map[string]any{"fingerprint": "x"}}).disclosureLines() != nil {
+		t.Error("only a disclosure is shown this way")
+	}
+}
