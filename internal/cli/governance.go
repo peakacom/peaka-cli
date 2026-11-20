@@ -43,6 +43,10 @@ var auditKinds = []string{
 	"MQ_REFRESH_REQUESTED",
 	"GROUP_MEMBER_ADDED", "GROUP_MEMBER_REMOVED",
 	"CATALOG_SHARED", "CATALOG_UNSHARED",
+	"GRANT_ADDED", "GRANT_CHANGED", "GRANT_REVOKED",
+	"GROUP_CREATED", "GROUP_UPDATED", "GROUP_DELETED",
+	"ATTRIBUTE_DEFINITION_CREATED", "ATTRIBUTE_DEFINITION_UPDATED",
+	"DIRECTORY_MAPPING_CHANGED",
 }
 
 // auditFields are the audit log's table columns; "?" ones only when an event on the page has them.
@@ -384,6 +388,11 @@ PUBLISHER or SERVICE. Row rule events name each exception by kind, id and name. 
 records the fingerprint a publisher accepted. CATALOG_SHARED and CATALOG_UNSHARED name the catalog
 (subject.catalogId, its name as subject.object, subject.projectId) and the project it was shared with (subject.targetProjectId);
 after.via says how a share ended: SOURCE_UNSHARED, TARGET_REMOVED or CATALOG_DELETED.
+GRANT_* name the target (subject.target: WORKSPACE, PROJECT, ORGANIZATION or ORGANIZATION_SEAT) and the grantee
+(subject.entityType, subject.entityId); before.roleId and after.roleId hold the role. GROUP_UPDATED keeps only the
+fields that changed; GROUP_DELETED keeps before.members. ATTRIBUTE_DEFINITION_* keep the whole definition, and
+DIRECTORY_MAPPING_CHANGED every users and groups mapping of subject.connectionId before and after. Masking policy
+events keep defaults and exceptions as lists.
 
 Kinds:
 ` + wrapList(auditKinds, 110),
