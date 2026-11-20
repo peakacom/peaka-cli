@@ -654,7 +654,8 @@ func TestAuditEventsShowActorKindAndImpersonator(t *testing.T) {
 	for _, k := range []string{"MQ_REFRESH_REQUESTED", "GROUP_MEMBER_ADDED", "GROUP_MEMBER_REMOVED", "MEMBERSHIP_DISCLOSURE_ACCEPTED",
 		"ROW_RULE_UPDATED", "PUBLISHER_ACCESS_LAPSED", "GOVERNANCE_SETTINGS_CHANGED", "TAGGED_COLUMN_LOST", "TAG_SUGGESTION_WITHDRAWN",
 		"CATALOG_SHARED", "CATALOG_UNSHARED", "GRANT_ADDED", "GRANT_CHANGED", "GRANT_REVOKED", "GROUP_CREATED", "GROUP_UPDATED",
-		"GROUP_DELETED", "ATTRIBUTE_DEFINITION_CREATED", "ATTRIBUTE_DEFINITION_UPDATED", "DIRECTORY_MAPPING_CHANGED"} {
+		"GROUP_DELETED", "ATTRIBUTE_DEFINITION_CREATED", "ATTRIBUTE_DEFINITION_UPDATED", "ATTRIBUTE_DEFINITION_DELETED",
+		"DIRECTORY_MAPPING_CHANGED"} {
 		found := false
 		for _, a := range auditKinds {
 			found = found || a == k
@@ -693,6 +694,9 @@ func TestAuditEventsShowActorKindAndImpersonator(t *testing.T) {
 	}
 	if got, _ := complete(events2, nil, "grant_"); len(got) != 3 || got[0] != "GRANT_ADDED" || got[2] != "GRANT_REVOKED" {
 		t.Errorf("--kind completes the grant kinds: %v", got)
+	}
+	if got, _ := complete(events2, nil, "attribute_definition_d"); len(got) != 1 || got[0] != "ATTRIBUTE_DEFINITION_DELETED" {
+		t.Errorf("--kind completes an attribute delete: %v", got)
 	}
 }
 

@@ -45,7 +45,7 @@ var auditKinds = []string{
 	"CATALOG_SHARED", "CATALOG_UNSHARED",
 	"GRANT_ADDED", "GRANT_CHANGED", "GRANT_REVOKED",
 	"GROUP_CREATED", "GROUP_UPDATED", "GROUP_DELETED",
-	"ATTRIBUTE_DEFINITION_CREATED", "ATTRIBUTE_DEFINITION_UPDATED",
+	"ATTRIBUTE_DEFINITION_CREATED", "ATTRIBUTE_DEFINITION_UPDATED", "ATTRIBUTE_DEFINITION_DELETED",
 	"DIRECTORY_MAPPING_CHANGED",
 }
 
@@ -390,7 +390,8 @@ records the fingerprint a publisher accepted. CATALOG_SHARED and CATALOG_UNSHARE
 after.via says how a share ended: SOURCE_UNSHARED, TARGET_REMOVED or CATALOG_DELETED.
 GRANT_* name the target (subject.target: WORKSPACE, PROJECT, ORGANIZATION or ORGANIZATION_SEAT) and the grantee
 (subject.entityType, subject.entityId); before.roleId and after.roleId hold the role. GROUP_UPDATED keeps only the
-fields that changed; GROUP_DELETED keeps before.members. ATTRIBUTE_DEFINITION_* keep the whole definition, and
+fields that changed; GROUP_DELETED keeps before.members. ATTRIBUTE_DEFINITION_* keep the whole definition (a delete
+in before; the values it removed are in the attribute change log with their sourceType and sourceId), and
 DIRECTORY_MAPPING_CHANGED every users and groups mapping of subject.connectionId before and after. Masking policy
 events keep defaults and exceptions as lists.
 
